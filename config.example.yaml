@@ -407,6 +407,9 @@ upstream:
     # than cooling down the entire credential across all sibling models.
     # Default: false
     model-level-cooling: false
+    # Use Responses WebSockets when a Codex credential does not set its own flag.
+    # An explicit per-credential value wins. Default: false.
+    websockets: false
 
   claude:
     # When true, scope quota cooldowns to the requested model rather than cooling down
