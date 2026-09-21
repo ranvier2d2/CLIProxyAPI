@@ -353,6 +353,9 @@ codex:
   # than cooling down the entire credential across all sibling models.
   # Default: false
   model-level-cooling: false
+  # Use the Responses WebSocket transport for Codex credentials whose auth file does not set
+  # its own `websockets` flag. An explicit per-credential value always wins. Default: false
+  websockets: false
   # Terminate and relay Codex Live WebRTC audio and DataChannel traffic in this process.
   # This requires inbound UDP reachability. Keep disabled to preserve direct media behavior.
   live-media-relay:

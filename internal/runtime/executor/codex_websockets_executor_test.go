@@ -3403,3 +3403,57 @@ func TestCodexWebsockets_SendErrorLogsSessionObject(t *testing.T) {
 		t.Fatalf("expected reason=send_error in log output, got: %s", logOutput)
 	}
 }
+
+func TestCodexWebsocketsEnabledFallback(t *testing.T) {
+	cases := []struct {
+		name     string
+		auth     *cliproxyauth.Auth
+		fallback bool
+		want     bool
+	}{
+		{
+			name:     "no flag uses fallback true",
+			auth:     &cliproxyauth.Auth{},
+			fallback: true,
+			want:     true,
+		},
+		{
+			name:     "no flag uses fallback false",
+			auth:     &cliproxyauth.Auth{},
+			fallback: false,
+			want:     false,
+		},
+		{
+			name:     "metadata false overrides fallback true",
+			auth:     &cliproxyauth.Auth{Metadata: map[string]any{"websockets": false}},
+			fallback: true,
+			want:     false,
+		},
+		{
+			name:     "attributes true overrides fallback false",
+			auth:     &cliproxyauth.Auth{Attributes: map[string]string{"websockets": "true"}},
+			fallback: false,
+			want:     true,
+		},
+		{
+			name:     "unparseable metadata uses fallback true",
+			auth:     &cliproxyauth.Auth{Metadata: map[string]any{"websockets": "garbage"}},
+			fallback: true,
+			want:     true,
+		},
+		{
+			name:     "nil auth ignores fallback",
+			auth:     nil,
+			fallback: true,
+			want:     false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := codexWebsocketsEnabled(tc.auth, tc.fallback); got != tc.want {
+				t.Fatalf("codexWebsocketsEnabled() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

@@ -215,6 +215,9 @@ type CodexConfig struct {
 	// ModelLevelCooling scopes Codex usage_limit_reached quota cooldowns to the requested model
 	// rather than cooling down the entire credential across all sibling models.
 	ModelLevelCooling bool `yaml:"model-level-cooling" json:"model-level-cooling"`
+	// Websockets uses the Responses WebSocket transport for Codex credentials whose auth file
+	// does not set its own `websockets` flag. An explicit per-credential value always wins. Default false.
+	Websockets bool `yaml:"websockets" json:"websockets"`
 	// LiveMediaRelay terminates and relays Codex Live WebRTC media in this process.
 	LiveMediaRelay CodexLiveMediaRelayConfig `yaml:"live-media-relay" json:"live-media-relay"`
 	// ResponseSteering enables full-duplex Codex WebSockets, bound to one
