@@ -39,12 +39,14 @@ func NewCodexWebsocketsExecutor(cfg *config.Config) *CodexWebsocketsExecutor {
 type CodexAutoExecutor struct {
 	httpExec *CodexExecutor
 	wsExec   *CodexWebsocketsExecutor
+	cfg      *config.Config
 }
 
 func NewCodexAutoExecutor(cfg *config.Config) *CodexAutoExecutor {
 	return &CodexAutoExecutor{
 		httpExec: NewCodexExecutor(cfg),
 		wsExec:   NewCodexWebsocketsExecutor(cfg),
+		cfg:      cfg,
 	}
 }
 
@@ -68,7 +70,7 @@ func (e *CodexAutoExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth
 	if e == nil || e.httpExec == nil || e.wsExec == nil {
 		return cliproxyexecutor.Response{}, fmt.Errorf("codex auto executor: executor is nil")
 	}
-	if cliproxyexecutor.DownstreamWebsocket(ctx) && codexWebsocketsEnabled(auth) {
+	if cliproxyexecutor.DownstreamWebsocket(ctx) && codexWebsocketsEnabled(auth, e.cfg != nil && e.cfg.Codex.Websockets) {
 		return e.wsExec.Execute(ctx, auth, req, opts)
 	}
 	if cliproxyexecutor.RequiredUpstreamWebsocket(ctx) {
@@ -81,7 +83,7 @@ func (e *CodexAutoExecutor) ExecuteStream(ctx context.Context, auth *cliproxyaut
 	if e == nil || e.httpExec == nil || e.wsExec == nil {
 		return nil, fmt.Errorf("codex auto executor: executor is nil")
 	}
-	if cliproxyexecutor.DownstreamWebsocket(ctx) && codexWebsocketsEnabled(auth) {
+	if cliproxyexecutor.DownstreamWebsocket(ctx) && codexWebsocketsEnabled(auth, e.cfg != nil && e.cfg.Codex.Websockets) {
 		return e.wsExec.ExecuteStream(ctx, auth, req, opts)
 	}
 	if cliproxyexecutor.RequiredUpstreamWebsocket(ctx) {
@@ -118,7 +120,7 @@ func (e *CodexAutoExecutor) UpstreamDisconnectChan(sessionID string) <-chan erro
 	return e.wsExec.UpstreamDisconnectChan(sessionID)
 }
 
-func codexWebsocketsEnabled(auth *cliproxyauth.Auth) bool {
+func codexWebsocketsEnabled(auth *cliproxyauth.Auth, fallback bool) bool {
 	if auth == nil {
 		return false
 	}
@@ -131,11 +133,11 @@ func codexWebsocketsEnabled(auth *cliproxyauth.Auth) bool {
 		}
 	}
 	if len(auth.Metadata) == 0 {
-		return false
+		return fallback
 	}
 	raw, ok := auth.Metadata["websockets"]
 	if !ok || raw == nil {
-		return false
+		return fallback
 	}
 	switch v := raw.(type) {
 	case bool:
@@ -147,5 +149,5 @@ func codexWebsocketsEnabled(auth *cliproxyauth.Auth) bool {
 		}
 	default:
 	}
-	return false
+	return fallback
 }
