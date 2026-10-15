@@ -11,22 +11,14 @@ import (
 
 func resetCloakLineage(t *testing.T) {
 	t.Helper()
-	previous := helps.SetClaudeCloakLineages(helps.NewClaudeCloakLineageStore(""))
+	previous := helps.SetClaudeCloakLineages(helps.NewClaudeCloakLineageStore())
 	t.Cleanup(func() { helps.SetClaudeCloakLineages(previous) })
 }
 
-// restartCloakLineage models a proxy process starting over the state in dir.
-// The store's writes finish before the test removes dir.
-func restartCloakLineage(t *testing.T, dir string) {
-	t.Helper()
-	store := helps.NewClaudeCloakLineageStore(dir)
-	helps.SetClaudeCloakLineages(store)
-	t.Cleanup(store.Flush)
-}
-
-// flushCloakLineage waits until the store's queued writes reached the disk.
-func flushCloakLineage() {
-	helps.ClaudeCloakLineages().Flush()
+// restartCloakLineage models a proxy restart: the new process holds no
+// lineage.
+func restartCloakLineage() {
+	helps.SetClaudeCloakLineages(helps.NewClaudeCloakLineageStore())
 }
 
 func cloakLineageFallbacks(reason string) int64 {

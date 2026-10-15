@@ -31,7 +31,6 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/pluginhost"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/redisqueue"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
-	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor/helps"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/safemode"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/store"
 	_ "github.com/router-for-me/CLIProxyAPI/v8/internal/translator"
@@ -648,12 +647,6 @@ func main() {
 		cfg.AuthDir = resolvedAuthDir
 	}
 	managementasset.SetCurrentConfig(cfg)
-	// Cloaked Claude Sessions stay bound to their kept thinking across restarts
-	// only if the proxy remembers what it forwarded.
-	cloakLineages := helps.NewClaudeCloakLineageStore(helps.ClaudeCloakLineageDir())
-	helps.SetClaudeCloakLineages(cloakLineages)
-	// Lineages still queued for the disk are written before the process exits.
-	defer cloakLineages.Flush()
 
 	// Create login options to be used in authentication flows.
 	options := &cmd.LoginOptions{

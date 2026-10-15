@@ -10,12 +10,18 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-// Reasons a compacted request falls back to main's placement.
+// Reasons a request falls back to main's placement.
 const (
 	ClaudeCloakFallbackNoSession      = "no_session"
 	ClaudeCloakFallbackUnknownSession = "unknown_session"
 	ClaudeCloakFallbackUnaligned      = "unaligned"
 	ClaudeCloakFallbackAmbiguous      = "ambiguous"
+	// ClaudeCloakFallbackNonForward: the request is no transition of its
+	// Session's lineage, such as an older request retried after a swap, a
+	// rollback past a compaction, or another conversation without a
+	// compaction block under the same header. Its Session's lineage stays as
+	// it was.
+	ClaudeCloakFallbackNonForward = "non_forward"
 )
 
 // Reasons an accepted request's placement did not become its Session's
@@ -24,17 +30,12 @@ const (
 const (
 	// ClaudeCloakRecoveryStale: the request was planned against a lineage
 	// another request of the Session has since replaced, and planning it again
-	// against the newer one gives a different placement; or another process
-	// sharing the state directory wrote the Session's file first. The newer
-	// lineage stays.
+	// against the newer one gives a different placement or no transition. The
+	// newer lineage stays.
 	ClaudeCloakRecoveryStale = "stale"
 	// ClaudeCloakRecoveryOversize: the request is past the per-Session cap, so
 	// the Session's lineage is dropped.
 	ClaudeCloakRecoveryOversize = "oversize"
-	// ClaudeCloakRecoveryUnwritten: the store could not write the lineage to
-	// disk, or forgot it before writing it. The process keeps using what it
-	// holds in memory; a restart sees the Session as the disk last held it.
-	ClaudeCloakRecoveryUnwritten = "unwritten"
 )
 
 // claudeCloakCommitAttempts bounds how often Commit plans again after another
@@ -70,12 +71,14 @@ type ClaudeCloakPlan struct {
 // starts at the newest compaction block. So within a Session every message the
 // proxy forwarded before must be forwarded again with the same bytes. The
 // Session's lineage is the transcript the caller holds, as forwarded, plus the
-// cut of a pending compaction. A request is one of these transitions:
+// cut of a pending compaction. Only these transitions advance it:
 //
-//   - No compaction block: the anchor is the first user message, dated today,
-//     exactly as on main. That position never moves.
+//   - No compaction block, in a lineage without one: the anchor is the first
+//     user message, dated today, exactly as on main. That position never
+//     moves.
 //   - Append: the request repeats the lineage through its newest compaction
-//     block. The common prefix aligns; what follows is new.
+//     block. The common prefix aligns; what follows is new. An unchanged
+//     resend is the append of nothing.
 //   - Compaction request: a request with a top-level compaction field, or one
 //     that repeats only a prefix of what the caller holds. It summarizes that
 //     prefix, so it leaves the rest of the lineage in place and records the
@@ -94,12 +97,21 @@ type ClaudeCloakPlan struct {
 //   - Swap without a pending cut, such as one the proxy saw no compaction
 //     request for: the kept turns are a run ending where the lineage ends.
 //
+// A swap brings a compaction block the Session has not had. Every other
+// request that leaves the lineage's epoch is no transition: one without a
+// compaction block after the lineage has one, or one whose newest block is a
+// block of the lineage or of an earlier epoch. It gets main's placement, the
+// plan names it non_forward, and the lineage stays for the Session's next
+// request.
+//
 // Every aligned message keeps the anchor and date it had; a new last user turn
 // gets a fresh one, dated today, only when no aligned anchor follows the
-// newest block. Without a Session, an unknown one, a request that does not
+// newest block. Without a Session, an unknown one, a swap that does not
 // align, or one that aligns two ways with different results, the request gets
-// main's placement and the plan names the reason. Nothing is guessed, and no
-// message is matched by content anywhere but at its position.
+// main's placement and the plan names the reason; that swap still starts the
+// Session's new epoch, so the epoch's later requests repeat the bytes it was
+// forwarded with. Nothing is guessed, and no message is matched by content
+// anywhere but at its position.
 //
 // The plan reads the lineage; only Commit writes it.
 func PlanClaudeCloak(payload []byte, sessionID, today string) ClaudeCloakPlan {
@@ -115,27 +127,31 @@ func PlanClaudeCloak(payload []byte, sessionID, today string) ClaudeCloakPlan {
 	return plan
 }
 
-// Commit records the plan's request as its Session's lineage and counts a
-// fallback. Call it only once the upstream accepted the request for
-// generation; count_tokens and rejected requests never commit.
+// Commit records the plan's request as its Session's lineage, unless it is no
+// transition of it, and counts a fallback. Call it only once the upstream
+// accepted the request for generation; count_tokens and rejected requests
+// never commit.
 //
 // The write is a compare-and-swap on the Session's revision. When another
 // request of the Session committed after this plan read the lineage, the
 // request is planned again against the newer lineage: if that gives the same
-// placement and a lineage within the per-Session caps, the bytes forwarded are
-// the ones the newer lineage implies and the new plan commits; if not, the
-// newer lineage stays and the conflict is counted as stale. Only a request
-// planned at the current revision can drop its Session for its size.
+// placement, a transition and a lineage within the per-Session caps, the bytes
+// forwarded are the ones the newer lineage implies and the new plan commits;
+// if not, the newer lineage stays and the conflict is counted as stale. Only a
+// request planned at the current revision can drop its Session for its size.
 func (p ClaudeCloakPlan) Commit() {
 	if p.Fallback != "" {
 		countClaudeCloakLineageFallback(p.Fallback)
-		if p.Fallback == ClaudeCloakFallbackNoSession {
+		switch p.Fallback {
+		case ClaudeCloakFallbackNoSession:
 			log.Debugf("claude cloak: compacted request without X-Session-ID uses main's placement")
-		} else {
+		case ClaudeCloakFallbackNonForward:
+			log.Infof("claude cloak: a request that does not continue its Session's lineage uses main's placement; the lineage stays as it was")
+		default:
 			log.Infof("claude cloak: compacted request uses main's placement (%s); kept thinking after its first user turn may be dropped", p.Fallback)
 		}
 	}
-	if p.key == "" {
+	if p.key == "" || p.Fallback == ClaudeCloakFallbackNonForward {
 		return
 	}
 	store := ClaudeCloakLineages()
@@ -149,13 +165,9 @@ func (p ClaudeCloakPlan) Commit() {
 			countClaudeCloakLineageFallback(ClaudeCloakRecoveryOversize)
 			log.Infof("claude cloak: a Session's request is past the lineage cap of %d messages or %d bytes; its lineage is dropped and its next compacted request uses main's placement", store.limits.sessionMessages, store.limits.sessionBytes)
 			return
-		case claudeCloakLineageUnwritten:
-			countClaudeCloakLineageFallback(ClaudeCloakRecoveryUnwritten)
-			return
 		}
-		anchors, _, replanned := p.request.place(true, known, current)
-		raw, errEncode := store.encode(replanned, store.now())
-		if attempt == claudeCloakCommitAttempts || !equalClaudeCloakAnchors(anchors, p.Anchors) || errEncode != nil || store.exceeds(replanned, raw) {
+		anchors, fallback, replanned := p.request.place(true, known, current)
+		if attempt == claudeCloakCommitAttempts || fallback == ClaudeCloakFallbackNonForward || !equalClaudeCloakAnchors(anchors, p.Anchors) || store.exceeds(replanned) {
 			countClaudeCloakLineageFallback(ClaudeCloakRecoveryStale)
 			log.Infof("claude cloak: a request planned against an older lineage of its Session conflicts with a newer one; the newer lineage stays")
 			return
@@ -210,6 +222,7 @@ func parseClaudeCloakRequest(payload []byte, today string) claudeCloakRequest {
 func (r claudeCloakRequest) place(sessioned, known bool, previous claudeCloakLineage) ([]ClaudeCloakAnchor, string, claudeCloakLineage) {
 	view, aligned, fallback := r.align(previous)
 	switch {
+	case fallback == ClaudeCloakFallbackNonForward:
 	case r.head < 0:
 		fallback = ""
 	case !sessioned:
@@ -228,7 +241,7 @@ func (r claudeCloakRequest) place(sessioned, known bool, previous claudeCloakLin
 	} else {
 		anchors = r.placeAnchors(view, aligned)
 	}
-	if !sessioned {
+	if !sessioned || fallback == ClaudeCloakFallbackNonForward {
 		return anchors, fallback, claudeCloakLineage{}
 	}
 
@@ -250,6 +263,7 @@ func (r claudeCloakRequest) place(sessioned, known bool, previous claudeCloakLin
 	for _, anchor := range anchors {
 		next.Messages[anchor.Index].Date = anchor.Date
 	}
+	next.Retired = retireClaudeCloakBlocks(previous, next.Messages)
 	switch {
 	case prefix || r.compaction:
 		next.Cut = len(r.messages)
@@ -257,6 +271,24 @@ func (r claudeCloakRequest) place(sessioned, known bool, previous claudeCloakLin
 		next.Cut = previous.Cut
 	}
 	return anchors, fallback, next
+}
+
+// retireClaudeCloakBlocks returns previous's retired blocks plus the blocks
+// of previous that next no longer holds, the newest claudeCloakRetiredBlocks.
+func retireClaudeCloakBlocks(previous claudeCloakLineage, next []ClaudeCloakLineageMessage) []string {
+	held := make(map[string]bool)
+	for _, message := range next {
+		if message.Compaction {
+			held[message.Hash] = true
+		}
+	}
+	retired := previous.Retired
+	for _, message := range previous.Messages {
+		if message.Compaction && !held[message.Hash] {
+			retired = append(retired[:len(retired):len(retired)], message.Hash)
+		}
+	}
+	return retired[max(0, len(retired)-claudeCloakRetiredBlocks):]
 }
 
 // keepsCut reports whether the request leaves previous's pending cut in
@@ -276,13 +308,25 @@ func (r claudeCloakRequest) keepsCut(previous claudeCloakLineage) bool {
 func (r claudeCloakRequest) align(previous claudeCloakLineage) ([]ClaudeCloakLineageMessage, []bool, string) {
 	messages, head := r.messages, r.head
 	aligned := make([]bool, len(messages))
+	previousHead := -1
+	for idx, message := range previous.Messages {
+		if message.Compaction {
+			previousHead = idx
+		}
+	}
 
 	// Append, or a compaction request within the epoch.
-	if common := claudeCloakCommonPrefix(messages, previous.Messages); head < 0 || common > head {
+	if common := claudeCloakCommonPrefix(messages, previous.Messages); common > head && common > previousHead {
 		for idx := 0; idx < common; idx++ {
 			aligned[idx] = true
 		}
 		return previous.Messages, aligned, ""
+	}
+
+	// Only a swap leaves the epoch, and a swap brings a block the Session has
+	// not had.
+	if head < 0 || claudeCloakBlockSeen(messages[head].Hash, previous) {
+		return nil, nil, ClaudeCloakFallbackNonForward
 	}
 
 	// A swap holds [request through its newest block, kept turns...].
@@ -311,12 +355,6 @@ func (r claudeCloakRequest) align(previous claudeCloakLineage) ([]ClaudeCloakLin
 	}
 
 	// Otherwise the kept turns are a run ending where the lineage ends.
-	previousHead := -1
-	for idx, message := range previous.Messages {
-		if message.Compaction {
-			previousHead = idx
-		}
-	}
 	var view []ClaudeCloakLineageMessage
 	var chosen []ClaudeCloakAnchor
 	var chosenAligned []bool
@@ -370,6 +408,20 @@ func (r claudeCloakRequest) placeAnchors(view []ClaudeCloakLineageMessage, align
 		}
 	}
 	return anchors
+}
+
+func claudeCloakBlockSeen(hash string, lineage claudeCloakLineage) bool {
+	for _, message := range lineage.Messages {
+		if message.Compaction && message.Hash == hash {
+			return true
+		}
+	}
+	for _, retired := range lineage.Retired {
+		if retired == hash {
+			return true
+		}
+	}
+	return false
 }
 
 func claudeCloakCommonPrefix(messages []claudeCloakMessage, previous []ClaudeCloakLineageMessage) int {
