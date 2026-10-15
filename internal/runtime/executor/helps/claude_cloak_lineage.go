@@ -2,7 +2,7 @@ package helps
 
 import (
 	"crypto/sha256"
-	"encoding/binary"
+	"crypto/sha512"
 	"encoding/hex"
 	"sync"
 	"sync/atomic"
@@ -49,10 +49,11 @@ type claudeCloakLineage struct {
 }
 
 // A Session's retired blocks are a Bloom filter of 8,192 bits probed 22 times
-// per block. With n blocks in it, a block it does not hold reads as held with
-// probability (1 - e^(-22n/8192))^22, 2.1e-7 at n = 256. Past 256 blocks the
-// filter reads every block as held, so the Session's later swaps get main's
-// placement and the bound on that probability holds for the Session's life.
+// per block, each probe 13 bits of its own from a SHA-512 of the block. With n
+// blocks in it, a block it does not hold reads as held with probability
+// (1 - e^(-22n/8192))^22: 2.0e-7 at the 255 blocks it is ever read with, 2.1e-7
+// at 256. At 256 blocks the filter reads every block as held, so the Session's
+// later swaps get main's placement and the bound holds for the Session's life.
 const (
 	claudeCloakRetiredBlocks = 256
 	claudeCloakRetiredBits   = 8192
@@ -87,14 +88,15 @@ func (f *claudeCloakRetired) holds(hash string) bool {
 	return true
 }
 
-// claudeCloakRetiredBitsOf derives a block's probes by double hashing; the
-// step is odd, so the probes are distinct bits.
+// claudeCloakRetiredBitsOf derives a block's probes from disjoint 13-bit
+// fields of one SHA-512, so each probe is independent of the others.
 func claudeCloakRetiredBitsOf(hash string) [claudeCloakRetiredProbes]uint64 {
-	sum := sha256.Sum256([]byte("cpa-claude-cloak-retired\x00" + hash))
-	h1, h2 := binary.LittleEndian.Uint64(sum[:8]), binary.LittleEndian.Uint64(sum[8:16])|1
+	sum := sha512.Sum512([]byte("cpa-claude-cloak-retired\x00" + hash))
 	var bits [claudeCloakRetiredProbes]uint64
 	for i := range bits {
-		bits[i] = (h1 + uint64(i)*h2) % claudeCloakRetiredBits
+		at := 13 * i
+		field := uint64(sum[at/8]) | uint64(sum[at/8+1])<<8 | uint64(sum[at/8+2])<<16
+		bits[i] = (field >> (at % 8)) % claudeCloakRetiredBits
 	}
 	return bits
 }
