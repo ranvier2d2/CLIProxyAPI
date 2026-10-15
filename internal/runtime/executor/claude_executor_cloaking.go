@@ -303,19 +303,6 @@ const claudeCodeFableReportingOutcomes = `# Reporting outcomes
 
 Report what actually happened, not what you intended. When you say something is done, sent, saved, fixed, or verified, that claim must rest on a result you observed in this session — tool output, the file as it now reads, the page as it now loads — not on what the step should have produced. If you did not check, say you did not check. If any step failed, was skipped, or came back different from what you expected, say so in the first sentence of your report, before anything else, even when the rest of the work succeeded. Never quietly work around a failure in a way that makes it look resolved; a problem the user can see is recoverable, one your summary hides is not. When you stop before the task is complete, your first line says so plainly and names what is left. Do not describe partial work as done, and do not let a summary read as more certain than the evidence behind it.`
 
-func checkSystemInstructionsWithMode(payload []byte, strictMode bool) []byte {
-	return checkSystemInstructionsWithSigningMode(payload, strictMode, false, "2.1.280", "cli", "")
-}
-
-// checkSystemInstructionsWithSigningMode keeps the top-level system in Claude
-// Code's minimal CLI shape. Each caller system block is preserved as a separate
-// mid-conversation system message after the first user turn, where supported
-// Claude models give it operator-level authority without changing the cached
-// top-level prefix.
-func checkSystemInstructionsWithSigningMode(payload []byte, strictMode bool, cchSigning bool, version, entrypoint, workload string) []byte {
-	return checkSystemInstructionsWithSigningModeAt(payload, strictMode, cchSigning, version, entrypoint, workload, time.Now(), false, "", "")
-}
-
 // isClaudeFable51Model reports whether the model is specifically Fable 5.1 / Mythos 5.1,
 // matching native Claude Code 2.1.258 family/major/minor checks (AFo = {major:5, minor:1}).
 func isClaudeFable51Model(model string) bool {
@@ -330,20 +317,6 @@ func isClaudeFable51Model(model string) bool {
 		}
 	}
 	return false
-}
-
-func checkSystemInstructionsWithSigningModeAt(
-	payload []byte,
-	strictMode bool,
-	cchSigning bool,
-	version, entrypoint, workload string,
-	now time.Time,
-	isSubagent bool,
-	prevReq, promptID string,
-	turnOrigin ...string,
-) []byte {
-	anchors := helps.PlanClaudeCloak(payload, "", claudeCodeLocalDate(now)).Anchors
-	return checkSystemInstructionsWithAnchors(payload, strictMode, cchSigning, version, entrypoint, workload, anchors, isSubagent, prevReq, promptID, turnOrigin...)
 }
 
 // checkSystemInstructionsWithAnchors applies the system cloak with the date
@@ -1158,10 +1131,6 @@ func claudeCredentialTimezone(auth *cliproxyauth.Auth) string {
 	return strings.TrimSpace(claudeauth.ReadMetadataString(&auth.Metadata, "timezone"))
 }
 
-func claudeCodeCurrentDateReminder(now time.Time) string {
-	return claudeCodeDateReminder(claudeCodeLocalDate(now))
-}
-
 func claudeCodeDateReminder(date string) string {
 	return fmt.Sprintf(`<system-reminder>
 As you answer the user's questions, you can use the following context:
@@ -1447,16 +1416,16 @@ func applyCloakingInternal(
 	confirmedClaudeCode bool,
 	cchSigning bool,
 	obfuscateSensitiveWords bool,
-) ([]byte, []helps.ClaudeCloakAnchor, bool, error) {
+) ([]byte, helps.ClaudeCloakPlan, bool, error) {
 	policy, settings := resolveClaudeWirePolicy(cfg, auth, apiKey, confirmedClaudeCode)
 	if !policy.Cloak {
-		return payload, nil, false, nil
+		return payload, helps.ClaudeCloakPlan{}, false, nil
 	}
 	// Strict mode drops caller system prompts entirely, so nothing needs a
 	// destination and an unusable block cannot lose information.
 	if !settings.strictMode {
 		if errSystem := validateClaudeCallerSystemBlocks(gjson.GetBytes(payload, "system")); errSystem != nil {
-			return nil, nil, false, errSystem
+			return nil, helps.ClaudeCloakPlan{}, false, errSystem
 		}
 	}
 
@@ -1488,7 +1457,8 @@ func applyCloakingInternal(
 		turnOrigin = "human"
 	}
 	// A caller that names its Session keeps every message it was forwarded
-	// before; probes and helpers share the name but not the conversation.
+	// before; probes and helpers share the name but not the conversation. The
+	// caller commits the plan once the upstream accepts the request.
 	sessionID := ""
 	if !isProbeOrHelper {
 		sessionID = strings.TrimSpace(helps.IncomingHeadersFromContext(ctx).Get("X-Session-ID"))
@@ -1537,7 +1507,7 @@ func applyCloakingInternal(
 		var errFakeUserID error
 		payload, errFakeUserID = injectFakeUserID(ctx, payload, apiKey, settings.cacheUserID)
 		if errFakeUserID != nil {
-			return nil, nil, false, errFakeUserID
+			return nil, helps.ClaudeCloakPlan{}, false, errFakeUserID
 		}
 	}
 
@@ -1547,10 +1517,7 @@ func applyCloakingInternal(
 		payload = helps.ObfuscateSensitiveWords(payload, matcher)
 	}
 
-	if !isProbeOrHelper {
-		plan.Commit()
-	}
-	return payload, plan.Anchors, true, nil
+	return payload, plan, true, nil
 }
 
 type claudeCacheControl struct {
