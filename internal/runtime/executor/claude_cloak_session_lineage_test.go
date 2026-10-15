@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -274,18 +272,15 @@ func TestClaudeCloakSessionSuccessiveCompactionsKeepEveryForwardedMessage(t *tes
 
 // count_tokens reads the lineage and never writes it: counting kept history
 // before the next turn is appended must not move the next generation's
-// injection, and must not touch the state on disk. Adapted from review sol-1
+// injection: had either count written the lineage, the generation would keep
+// a date on the kept user. Adapted from review sol-1
 // (TestSolCountTokensMustNotEstablishKeptTurnAnchor).
 func TestClaudeCloakSessionCountTokensNeverWrites(t *testing.T) {
 	resetCloakLineage(t)
-	dir := t.TempDir()
-	restartCloakLineage(t, dir)
 	const session = "lin-count-tokens"
 	toolUse := `{"role":"assistant","content":[{"type":"thinking","thinking":"t","signature":"lin-count-2"},{"type":"tool_use","id":"lin-tool-1","name":"read_file","input":{}}]}`
 	toolResult := `{"role":"user","content":[{"type":"tool_result","tool_use_id":"lin-tool-1","content":"ok"}]}`
 	linSend(t, session, linBody(linUser("start"), linThinking("lin-count-1"), linUser("old kept question"), toolUse, toolResult))
-	flushCloakLineage()
-	snapshot := linDirSnapshot(t, dir)
 
 	transport := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
 		_, _ = io.ReadAll(req.Body)
@@ -303,10 +298,6 @@ func TestClaudeCloakSessionCountTokensNeverWrites(t *testing.T) {
 			t.Fatalf("count_tokens: %v", errCount)
 		}
 	}
-	flushCloakLineage()
-	if after := linDirSnapshot(t, dir); after != snapshot {
-		t.Fatalf("count_tokens changed the cloak state on disk:\nbefore %s\nafter  %s", snapshot, after)
-	}
 
 	generation := linSend(t, session, linBody(append(append([]string{linBlock("lin-count-block")}, kept...), linThinking("lin-count-3"), linUser("new question"))...))
 	for idx := 1; idx <= 4; idx++ {
@@ -319,57 +310,16 @@ func TestClaudeCloakSessionCountTokensNeverWrites(t *testing.T) {
 	}
 }
 
-func linDirSnapshot(t *testing.T, dir string) string {
-	t.Helper()
-	var parts []string
-	errWalk := filepath.Walk(dir, func(path string, info os.FileInfo, errInfo error) error {
-		if errInfo != nil || info.IsDir() {
-			return errInfo
-		}
-		raw, errRead := os.ReadFile(path)
-		if errRead != nil {
-			return errRead
-		}
-		sum := sha256.Sum256(raw)
-		parts = append(parts, fmt.Sprintf("%s:%s:%d", strings.TrimPrefix(path, dir), hex.EncodeToString(sum[:8]), info.ModTime().UnixNano()))
-		return nil
-	})
-	if errWalk != nil {
-		t.Fatal(errWalk)
-	}
-	return strings.Join(parts, ",")
-}
-
-// A restart that keeps the state directory keeps every placement.
-func TestClaudeCloakSessionRestartWithPersistedState(t *testing.T) {
-	resetCloakLineage(t)
-	dir := t.TempDir()
-	restartCloakLineage(t, dir)
-	const session = "lin-restart-kept"
-	linSend(t, session, linBody(linUser("start"), linThinking("lin-r0"), linUser("q0")))
-	first := linSend(t, session, linBody(linBlock("lin-restart-1"), linThinking("lin-r0"), linUser("q0"), linThinking("lin-r1"), linUser("anchored")))
-	if !linDated(first.forms[4]) {
-		t.Fatal("the new user should carry the date")
-	}
-	restartCloakLineage(t, dir)
-	next := linSend(t, session, linBody(linBlock("lin-restart-2"), linUser("anchored"), linThinking("lin-r2"), linUser("after restart")))
-	linAssertKept(t, "swap after restart", first, 4, next, 1, 1)
-	if linDated(next.forms[3]) {
-		t.Fatal("the new user got a second date after the restart")
-	}
-}
-
-// A restart that loses the state cannot know where the kept turns were
-// injected. The proxy falls back to main's placement for that request, counts
+// A restart loses every lineage: the proxy cannot know where the kept turns
+// were injected. It falls back to main's placement for that request, counts
 // it, and keeps what it forwarded from then on.
-func TestClaudeCloakSessionRestartWithLostStateFallsBackAndSaysSo(t *testing.T) {
+func TestClaudeCloakSessionRestartFallsBackAndSaysSo(t *testing.T) {
 	resetCloakLineage(t)
-	restartCloakLineage(t, t.TempDir())
-	const session = "lin-restart-lost"
+	const session = "lin-restart"
 	linSend(t, session, linBody(linUser("start"), linThinking("lin-l0"), linUser("q0")))
 	linSend(t, session, linBody(linBlock("lin-lost-1"), linThinking("lin-l0"), linUser("q0"), linThinking("lin-l1"), linUser("anchored")))
 
-	restartCloakLineage(t, t.TempDir())
+	restartCloakLineage()
 	before := cloakLineageFallbacks("unknown_session")
 	lost := linSend(t, session, linBody(linBlock("lin-lost-1"), linThinking("lin-l0"), linUser("q0"), linThinking("lin-l1"), linUser("anchored"), linThinking("lin-l2"), linUser("after restart")))
 	if got := cloakLineageFallbacks("unknown_session"); got != before+1 {

@@ -52,7 +52,7 @@ type forwardedPixirRequest struct {
 // forwardPixirCompactionSequence replays the recording through ExecuteStream
 // with fresh in-memory cloak state. beforeEach, when set, runs before every
 // request, for example to model a proxy restart.
-func forwardPixirCompactionSequence(t *testing.T, sessionHeader string, beforeEach func()) []forwardedPixirRequest {
+func forwardPixirCompactionSequence(t *testing.T, sessionHeader string) []forwardedPixirRequest {
 	t.Helper()
 	resetCloakLineage(t)
 	var captured []byte
@@ -82,9 +82,6 @@ func forwardPixirCompactionSequence(t *testing.T, sessionHeader string, beforeEa
 
 	var forwarded []forwardedPixirRequest
 	for _, request := range loadPixirCompactionSequence(t) {
-		if beforeEach != nil {
-			beforeEach()
-		}
 		headers := make(http.Header)
 		headers.Set("Content-Type", "application/json")
 		headers.Set("Anthropic-Version", "2023-06-01")
@@ -164,29 +161,10 @@ type thinkingBinding struct {
 // The caller names its Session with X-Session-ID, as Pixir does on this route;
 // the proxy keeps each Session's lineage under that name.
 func TestClaudeCloakKeepsCompactionKeptThinkingBound(t *testing.T) {
-	assertPixirKeptThinkingBound(t, forwardPixirCompactionSequence(t, pixirSessionHeader, nil))
+	assertPixirKeptThinkingBound(t, forwardPixirCompactionSequence(t, pixirSessionHeader))
 }
 
 const pixirSessionHeader = "pixir-session-0123456789abcdef"
-
-// TestClaudeCloakKeepsCompactionKeptThinkingBoundAcrossRestarts replays the
-// same recording with a proxy restart before every request: each request sees
-// new state that only has what the previous ones wrote to disk. A second
-// process sharing the directory is the same case.
-func TestClaudeCloakKeepsCompactionKeptThinkingBoundAcrossRestarts(t *testing.T) {
-	dir := t.TempDir()
-	forwarded := forwardPixirCompactionSequence(t, pixirSessionHeader, func() {
-		restartCloakLineage(t, dir)
-	})
-	assertPixirKeptThinkingBound(t, forwarded)
-	// The billing header differs per process anyway; it is outside the check.
-	want := forwardPixirCompactionSequence(t, pixirSessionHeader, nil)
-	for i := range want {
-		if gjson.GetBytes(forwarded[i].body, "messages").Raw != gjson.GetBytes(want[i].body, "messages").Raw {
-			t.Fatalf("tee #%d: forwarded messages differ between a restarting proxy and one that never restarts", want[i].tee)
-		}
-	}
-}
 
 func assertPixirKeptThinkingBound(t *testing.T, forwarded []forwardedPixirRequest) {
 	t.Helper()
@@ -285,7 +263,7 @@ func assertPixirKeptThinkingBound(t *testing.T, forwarded []forwardedPixirReques
 // hash of the first user and assistant texts, which the swap replaces, and a
 // compaction request whose kept messages carry no text has no key at all.
 func TestClaudeCloakSessionHeaderKeepsAffinityAndUserIDAcrossCompaction(t *testing.T) {
-	forwarded := forwardPixirCompactionSequence(t, pixirSessionHeader, nil)
+	forwarded := forwardPixirCompactionSequence(t, pixirSessionHeader)
 
 	wantKey := cliproxyauth.CanonicalSessionID(forwarded[0].headers, forwarded[0].caller, nil)
 	wantUserID := gjson.GetBytes(forwarded[0].body, "metadata.user_id").String()
