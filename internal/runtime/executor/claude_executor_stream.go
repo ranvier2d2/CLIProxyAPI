@@ -97,7 +97,8 @@ func (e *ClaudeExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 	bodyBeforeCloaking := body
 	isProbeOrHelper := helps.IsClaudeProbeOrHelperRequest(bodyBeforeCloaking)
 	var cloaked bool
-	body, cloaked, err = applyCloakingInternal(
+	var cloakPlan helps.ClaudeCloakPlan
+	body, cloakPlan, cloaked, err = applyCloakingInternal(
 		ctx,
 		e.cfg,
 		auth,
@@ -110,7 +111,7 @@ func (e *ClaudeExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 	if err != nil {
 		return nil, err
 	}
-	systemPlacementState := captureClaudeCodeSystemPlacement(bodyBeforeCloaking, body, cloaked)
+	systemPlacementState := captureClaudeCodeSystemPlacement(bodyBeforeCloaking, body, cloaked, cloakPlan.Anchors)
 	fableState := captureClaudeCodeFableState(bodyBeforeCloaking, body, cloaked)
 	// Only the Messages endpoint on Anthropic itself was captured; count_tokens
 	// keeps its own shape and other gateways never see this field.
@@ -360,6 +361,9 @@ func (e *ClaudeExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 		}
 		return nil, classifyClaudeUpstreamErrorWithCooling(httpResp.StatusCode, httpResp.Header, b, e.modelLevelCooling())
 	}
+	// The upstream accepted the request, so what the cloak forwarded becomes
+	// the Session's lineage.
+	cloakPlan.Commit()
 	decodedBody, err := decodeResponseBody(httpResp.Body, claudeResponseContentEncoding(httpResp.Header))
 	if err != nil {
 		helps.RecordAPIResponseError(ctx, e.cfg, err)
