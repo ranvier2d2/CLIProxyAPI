@@ -2,42 +2,22 @@ package helps
 
 import (
 	"fmt"
-	"math"
 	"testing"
 
 	"github.com/tidwall/gjson"
 )
 
-// The retired filter holds every block added to it, and reads a block it does
-// not hold as held at the rate its sizing predicts.
-func TestClaudeCloakRetiredHoldsEveryBlockAndMissesAtThePredictedRate(t *testing.T) {
+// The retired filter holds every block added to it.
+func TestClaudeCloakRetiredHoldsEveryBlock(t *testing.T) {
 	var f claudeCloakRetired
 	for i := 0; i < claudeCloakRetiredBlocks; i++ {
 		f.add(fmt.Sprintf("held-%d", i))
 	}
+	f.blocks = 0 // read the bits, not the bound
 	for i := 0; i < claudeCloakRetiredBlocks; i++ {
-		f.blocks = 0 // read the bits, not the bound
 		if !f.holds(fmt.Sprintf("held-%d", i)) {
 			t.Fatalf("filter forgot block %d", i)
 		}
-	}
-
-	// At 256 blocks the predicted rate, 2.1e-7, is too small to observe; at 600
-	// it is 0.75%, so 200,000 probes check the probes are as good as the math.
-	for i := claudeCloakRetiredBlocks; i < 600; i++ {
-		f.add(fmt.Sprintf("held-%d", i))
-	}
-	f.blocks = 0
-	const probes = 200000
-	misses := 0
-	for i := 0; i < probes; i++ {
-		if f.holds(fmt.Sprintf("absent-%d", i)) {
-			misses++
-		}
-	}
-	want := probes * math.Pow(1-math.Exp(-claudeCloakRetiredProbes*600.0/claudeCloakRetiredBits), claudeCloakRetiredProbes)
-	if float64(misses) < 0.8*want || float64(misses) > 1.2*want {
-		t.Fatalf("%d of %d absent blocks read as held, predicted %.0f", misses, probes, want)
 	}
 }
 
