@@ -411,10 +411,25 @@ func checkSystemInstructionsWithSigningModeAt(
 	keepCallerSystemTopLevel bool,
 	turnOrigin ...string,
 ) []byte {
+	anchors := helps.PlanClaudeCloak(payload, "", currentDate).Anchors
+	return checkSystemInstructionsWithAnchors(payload, strictMode, cchSigning, version, entrypoint, workload, anchors, isSubagent, prevReq, promptID, keepCallerSystemTopLevel, turnOrigin...)
+}
+
+// checkSystemInstructionsWithAnchors applies the system cloak with the date
+// reminder and the relocated caller system prompt on the planned anchors.
+func checkSystemInstructionsWithAnchors(
+	payload []byte,
+	strictMode bool,
+	cchSigning bool,
+	version, entrypoint, workload string,
+	anchors []helps.ClaudeCloakAnchor,
+	isSubagent bool,
+	prevReq, promptID string,
+	keepCallerSystemTopLevel bool,
+	turnOrigin ...string,
+) []byte {
 	system := gjson.GetBytes(payload, "system")
 	messageText := claudeBillingFingerprintMessageText(payload)
-	anchorTime, _ := time.Parse("2006-01-02", currentDate)
-	anchors := planClaudeCloakAnchors(payload, anchorTime, true)
 
 	billingText := generateBillingHeader(cchSigning, version, messageText, entrypoint, workload, isSubagent, prevReq, promptID, turnOrigin...)
 	billingBlock := buildTextBlock(billingText, nil)
@@ -468,12 +483,12 @@ func checkSystemInstructionsWithSigningModeAt(
 // using the same positional mapping as the Messages path. That keeps the counted
 // tokens aligned with the request the caller is about to send while preventing a
 // third-party system prompt from reaching Anthropic in the system slot.
-func relocateClaudeSystemPromptForCountTokens(payload []byte, strictMode bool, explicitCacheMode ...bool) []byte {
+func relocateClaudeSystemPromptForCountTokens(payload []byte, strictMode bool, sessionID string, explicitCacheMode ...bool) []byte {
 	isExplicit := (len(explicitCacheMode) > 0 && explicitCacheMode[0]) || isExplicitPromptCacheMode(payload)
-	return relocateClaudeSystemPromptForCountTokensWithPolicy(payload, strictMode, isExplicit, false)
+	return relocateClaudeSystemPromptForCountTokensWithPolicy(payload, strictMode, isExplicit, false, sessionID)
 }
 
-func relocateClaudeSystemPromptForCountTokensWithPolicy(payload []byte, strictMode, explicitCacheMode, keepCallerSystemTopLevel bool) []byte {
+func relocateClaudeSystemPromptForCountTokensWithPolicy(payload []byte, strictMode, explicitCacheMode, keepCallerSystemTopLevel bool, sessionIDs ...string) []byte {
 	system := gjson.GetBytes(payload, "system")
 	if !system.Exists() {
 		return payload
@@ -506,7 +521,9 @@ func relocateClaudeSystemPromptForCountTokensWithPolicy(payload []byte, strictMo
 		return payload
 	}
 	payload = updated
-	anchors := planClaudeCloakAnchors(payload, time.Now(), false)
+	sessionID := ""
+	if len(sessionIDs)>0 { sessionID = sessionIDs[0] }
+	anchors := helps.PlanClaudeCloak(payload, sessionID, claudeCodeLocalDate(time.Now())).Anchors
 	if claudeUsesLegacySystemReminder(payload) {
 		return prependClaudeSystemReminderBlocks(payload, forwardedSystemBlocks, anchors, isExplicit)
 	}
@@ -735,13 +752,13 @@ func prependClaudeSystemRemindersToFirstUserMessage(payload []byte, texts []stri
 }
 
 func prependClaudeSystemReminderBlocksToFirstUserMessage(payload []byte, blocks []forwardedClaudeSystemPromptBlock, isExplicit bool) []byte {
-    anchors := planClaudeCloakAnchors(payload, time.Now(), false)
+    anchors := helps.PlanClaudeCloak(payload, "", claudeCodeLocalDate(time.Now())).Anchors
     return prependClaudeSystemReminderBlocks(payload, blocks, anchors, isExplicit)
 }
 
-func prependClaudeSystemReminderBlocks(payload []byte, blocks []forwardedClaudeSystemPromptBlock, anchors []claudeCloakAnchor, isExplicit bool) []byte {
+func prependClaudeSystemReminderBlocks(payload []byte, blocks []forwardedClaudeSystemPromptBlock, anchors []helps.ClaudeCloakAnchor, isExplicit bool) []byte {
     for _, anchor := range anchors {
-        payload = prependClaudeSystemReminderBlocksAt(payload, blocks, anchor.index, isExplicit)
+        payload = prependClaudeSystemReminderBlocksAt(payload, blocks, anchor.Index, isExplicit)
     }
     return payload
 }
@@ -910,13 +927,13 @@ func insertClaudeMidConversationSystemMessages(payload []byte, texts []string) [
 }
 
 func insertClaudeMidConversationSystemBlocks(payload []byte, blocks []forwardedClaudeSystemPromptBlock, isExplicit bool) []byte {
-    anchors := planClaudeCloakAnchors(payload, time.Now(), false)
+    anchors := helps.PlanClaudeCloak(payload, "", claudeCodeLocalDate(time.Now())).Anchors
     return insertClaudeMidConversationSystemBlocksAtAnchors(payload, blocks, anchors, isExplicit)
 }
 
-func insertClaudeMidConversationSystemBlocksAtAnchors(payload []byte, blocks []forwardedClaudeSystemPromptBlock, anchors []claudeCloakAnchor, isExplicit bool) []byte {
+func insertClaudeMidConversationSystemBlocksAtAnchors(payload []byte, blocks []forwardedClaudeSystemPromptBlock, anchors []helps.ClaudeCloakAnchor, isExplicit bool) []byte {
     for i := len(anchors)-1; i >= 0; i-- {
-        payload = insertClaudeMidConversationSystemBlocksAt(payload, blocks, anchors[i].index, isExplicit)
+        payload = insertClaudeMidConversationSystemBlocksAt(payload, blocks, anchors[i].Index, isExplicit)
     }
     return payload
 }
@@ -999,9 +1016,8 @@ type claudeCodeSystemPlacementRun struct {
 // immediately after cloaking. The message-count increase is part of the proof:
 // insertClaudeMidConversationSystemMessages returns without inserting when the
 // same turns already exist, and those pre-existing turns belong to the caller.
-// The anchors are planned again without recording; cloaking has just recorded
-// them, so the plan is the one cloaking applied.
-func captureClaudeCodeSystemPlacement(before, after []byte, cloaked bool) claudeCodeSystemPlacementState {
+// anchors are the ones cloaking applied.
+func captureClaudeCodeSystemPlacement(before, after []byte, cloaked bool, anchors []helps.ClaudeCloakAnchor) claudeCodeSystemPlacementState {
 	if !cloaked || claudeUsesLegacySystemReminder(before) {
 		return claudeCodeSystemPlacementState{}
 	}
@@ -1010,7 +1026,6 @@ func captureClaudeCodeSystemPlacement(before, after []byte, cloaked bool) claude
 		return claudeCodeSystemPlacementState{}
 	}
 
-	anchors := planClaudeCloakAnchors(before, time.Now(), false)
 	beforeMessages := gjson.GetBytes(before, "messages").Array()
 	afterMessages := gjson.GetBytes(after, "messages").Array()
 	if len(anchors) == 0 || len(afterMessages) != len(beforeMessages)+len(anchors)*len(texts) {
@@ -1018,7 +1033,7 @@ func captureClaudeCodeSystemPlacement(before, after []byte, cloaked bool) claude
 	}
 	runs := make([]claudeCodeSystemPlacementRun, 0, len(anchors))
 	for i, anchor := range anchors {
-		insertAt := claudeLeadingUserRunEnd(beforeMessages, anchor.index)
+		insertAt := claudeLeadingUserRunEnd(beforeMessages, anchor.Index)
 		shift := i * len(texts)
 		insertAt += shift
 		if insertAt+len(texts) > len(afterMessages) {
@@ -1032,7 +1047,7 @@ func captureClaudeCodeSystemPlacement(before, after []byte, cloaked bool) claude
 			}
 			insertedRaw[idx] = message.Raw
 		}
-		runs = append(runs, claudeCodeSystemPlacementRun{anchor: anchor.index + shift, insertAt: insertAt, insertedRaw: insertedRaw})
+		runs = append(runs, claudeCodeSystemPlacementRun{anchor: anchor.Index + shift, insertAt: insertAt, insertedRaw: insertedRaw})
 	}
 	return claudeCodeSystemPlacementState{runs: runs, texts: append([]string(nil), texts...)}
 }
@@ -1049,7 +1064,7 @@ func reconcileClaudeCodeSystemPlacementAfterPayload(payload []byte, state claude
 	}
 	messages := gjson.GetBytes(payload, "messages").Array()
 	inserted := make(map[int]bool)
-	anchors := make([]claudeCloakAnchor, 0, len(state.runs))
+	anchors := make([]helps.ClaudeCloakAnchor, 0, len(state.runs))
 	for i, run := range state.runs {
 		if run.insertAt < 0 || run.insertAt+len(run.insertedRaw) > len(messages) {
 			return payload
@@ -1060,7 +1075,7 @@ func reconcileClaudeCodeSystemPlacementAfterPayload(payload []byte, state claude
 			}
 			inserted[run.insertAt+idx] = true
 		}
-		anchors = append(anchors, claudeCloakAnchor{index: run.anchor - i*len(state.texts)})
+		anchors = append(anchors, helps.ClaudeCloakAnchor{Index: run.anchor - i*len(state.texts)})
 	}
 
 	rawMessages := make([]string, 0, len(messages)-len(inserted))
@@ -1452,17 +1467,16 @@ func resolveClaudeSessionPinnedDate(
 // user message. date is the already-resolved calendar date (the session-pinned
 // one whenever continuity is available) so the reminder text cannot change
 // between requests of one session.
-func injectClaudeCodeCurrentDate(payload []byte, anchors []claudeCloakAnchor, explicit ...bool) []byte {
+func injectClaudeCodeCurrentDate(payload []byte, anchors []helps.ClaudeCloakAnchor, explicit ...bool) []byte {
     isExplicit := len(explicit)>0 && explicit[0]
     for _, anchor := range anchors {
-        payload = injectClaudeCodeDateReminderAt(payload, anchor.index, anchor.date, isExplicit)
+        payload = injectClaudeCodeDateReminderAt(payload, anchor.Index, anchor.Date, isExplicit)
     }
     return payload
 }
 
 func injectClaudeCodeCurrentDateInternal(payload []byte, date string, isExplicit bool) []byte {
-    now, _ := time.Parse("2006-01-02", date)
-    return injectClaudeCodeCurrentDate(payload, planClaudeCloakAnchors(payload, now, false), isExplicit)
+    return injectClaudeCodeCurrentDate(payload, helps.PlanClaudeCloak(payload, "", date).Anchors, isExplicit)
 }
 
 func injectClaudeCodeDateReminderAt(payload []byte, anchorIdx int, date string, isExplicit bool) []byte {
@@ -1699,7 +1713,8 @@ func applyCloaking(
 	confirmedClaudeCode bool,
 	cchSigning bool,
 ) ([]byte, bool, error) {
-	return applyCloakingInternal(ctx, cfg, auth, payload, apiKey, confirmedClaudeCode, cchSigning, true)
+	out, _, cloaked, err := applyCloakingInternal(ctx, cfg, auth, payload, apiKey, confirmedClaudeCode, cchSigning, true)
+	return out, cloaked, err
 }
 
 func applyCloakingInternal(
@@ -1712,17 +1727,17 @@ func applyCloakingInternal(
 	cchSigning bool,
 	obfuscateSensitiveWords bool,
 	explicitCacheMode ...bool,
-) ([]byte, bool, error) {
+) ([]byte, []helps.ClaudeCloakAnchor, bool, error) {
 	policy, settings := resolveClaudeWirePolicy(cfg, auth, apiKey, confirmedClaudeCode)
 	if !policy.Cloak {
-		return payload, false, nil
+		return payload, nil, false, nil
 	}
 	isExplicit := (len(explicitCacheMode) > 0 && explicitCacheMode[0]) || isExplicitPromptCacheModeContext(ctx)
 	// Strict mode drops caller system prompts entirely, so nothing needs a
 	// destination and an unusable block cannot lose information.
 	if !settings.strictMode {
 		if errSystem := validateClaudeCallerSystemBlocks(gjson.GetBytes(payload, "system")); errSystem != nil {
-			return nil, false, errSystem
+			return nil, nil, false, errSystem
 		}
 	}
 
@@ -1769,14 +1784,22 @@ func applyCloakingInternal(
 	if isExplicit {
 		turnOriginArgs = append(turnOriginArgs, "explicit_cache_mode")
 	}
-	payload = checkSystemInstructionsWithSigningModeAt(
+		// A caller that names its Session keeps every message it was forwarded
+	// before; probes and helpers share the name but not the conversation.
+	sessionID := ""
+	if !isProbeOrHelper {
+		sessionID = strings.TrimSpace(helps.IncomingHeadersFromContext(ctx).Get("X-Session-ID"))
+	}
+	plan := helps.PlanClaudeCloak(payload, sessionID, pinnedDate)
+	payload = checkSystemInstructionsWithAnchors(
+
 		payload,
 		settings.strictMode,
 		cchSigning,
 		billingVersion,
 		"cli",
 		workload,
-		pinnedDate,
+		plan.Anchors,
 		isSubagent,
 		prevReq,
 		promptID,
@@ -1813,7 +1836,7 @@ func applyCloakingInternal(
 		var errFakeUserID error
 		payload, errFakeUserID = injectFakeUserID(ctx, payload, apiKey, settings.cacheUserID)
 		if errFakeUserID != nil {
-			return nil, false, errFakeUserID
+			return nil, nil, false, errFakeUserID
 		}
 	}
 
@@ -1823,7 +1846,10 @@ func applyCloakingInternal(
 		payload = helps.ObfuscateSensitiveWords(payload, matcher)
 	}
 
-	return payload, true, nil
+	if !isProbeOrHelper {
+		plan.Commit()
+	}
+	return payload, plan.Anchors, true, nil
 }
 
 type claudeCacheControl struct {

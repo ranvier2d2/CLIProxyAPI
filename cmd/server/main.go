@@ -652,9 +652,9 @@ func main() {
 	}
 	githubauth.SetToken(cfg.GitHubToken)
 	managementasset.SetCurrentConfig(cfg)
-	// Cloaked Claude conversations stay bound to their kept thinking across
-	// restarts only if the proxy remembers where it injected.
-	helps.SetClaudeCloakAnchors(helps.NewClaudeCloakAnchorMemo(helps.ClaudeCloakAnchorMemoPath()))
+	// Cloaked Claude Sessions stay bound to their kept thinking across restarts
+	// only if the proxy remembers what it forwarded.
+	helps.SetClaudeCloakLineages(helps.NewClaudeCloakLineageStore(helps.ClaudeCloakLineageDir()))
 
 	// Create login options to be used in authentication flows.
 	options := &cmd.LoginOptions{

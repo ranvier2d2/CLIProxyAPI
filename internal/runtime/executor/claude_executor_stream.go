@@ -106,7 +106,7 @@ func (e *ClaudeExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 		ctx = withExplicitPromptCacheMode(ctx, true)
 	}
 	var cloaked bool
-	body, cloaked, err = applyCloakingInternal(
+	body, _, cloaked, err = applyCloakingInternal(
 		ctx,
 		e.cfg,
 		auth,

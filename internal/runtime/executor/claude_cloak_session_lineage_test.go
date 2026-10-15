@@ -388,7 +388,7 @@ func TestClaudeCloakWithoutSessionHeaderMatchesMain(t *testing.T) {
 		h := sha256.New()
 		for _, body := range cases {
 			h.Write(checkSystemInstructionsWithSigningModeAt(body, false, false, "2.1.280", "cli", "", at, false, "", ""))
-			h.Write(relocateClaudeSystemPromptForCountTokens(body, false))
+			h.Write(relocateClaudeSystemPromptForCountTokens(body, false, ""))
 		}
 		return hex.EncodeToString(h.Sum(nil))
 	}
@@ -419,4 +419,58 @@ func TestClaudeCloakWithoutSessionHeaderMatchesMain(t *testing.T) {
 	if !linDated(view.forms[1]) || linDated(view.forms[3]) {
 		t.Fatal("without a session header the first user after the block carries the date, as on main")
 	}
+}
+
+// A swap whose kept turns are not a run ending where the lineage ends, here
+// because the caller edited a kept turn, cannot be placed: main's placement,
+// counted as unaligned.
+func TestClaudeCloakSessionEditedKeptTurnFallsBackAndSaysSo(t *testing.T) {
+	resetCloakLineage(t)
+	const session = "lin-edited-kept"
+	linSend(t, session, linBody(linUser("start"), linThinking("lin-x0"), linUser("q0")))
+	linSend(t, session, linBody(linBlock("lin-edit-1"), linThinking("lin-x0"), linUser("q0"), linThinking("lin-x1"), linUser("anchored")))
+	before := cloakLineageFallbacks("unaligned")
+	edited := linSend(t, session, linBody(linBlock("lin-edit-2"), linUser("anchored, edited"), linThinking("lin-x2"), linUser("next")))
+	if got := cloakLineageFallbacks("unaligned"); got != before+1 {
+		t.Fatalf("unaligned fallbacks %d, want %d", got, before+1)
+	}
+	if !linDated(edited.forms[1]) || linDated(edited.forms[3]) {
+		t.Fatal("fallback should use main's placement, the first user after the block")
+	}
+}
+
+// Within an epoch the caller may resend its last turn edited, for example
+// after a failed request. Everything before the edit keeps its bytes and the
+// edited turn is new, so it takes the injection the old one had. No fallback.
+func TestClaudeCloakSessionEditedLastTurnWithinAnEpochKeepsThePrefix(t *testing.T) {
+	resetCloakLineage(t)
+	const session = "lin-edited-last"
+	linSend(t, session, linBody(linUser("start"), linThinking("lin-y0"), linUser("q0")))
+	first := linSend(t, session, linBody(linBlock("lin-edit-last-1"), linThinking("lin-y0"), linUser("q0"), linThinking("lin-y1"), linUser("typo")))
+	before := cloakLineageFallbacks("unaligned") + cloakLineageFallbacks("ambiguous")
+	retried := linSend(t, session, linBody(linBlock("lin-edit-last-1"), linThinking("lin-y0"), linUser("q0"), linThinking("lin-y1"), linUser("fixed")))
+	if got := cloakLineageFallbacks("unaligned") + cloakLineageFallbacks("ambiguous"); got != before {
+		t.Fatalf("an edited last turn counted %d fallbacks", got-before)
+	}
+	linAssertKept(t, "resend with an edited last turn", first, 0, retried, 0, 4)
+	if !linDated(retried.forms[4]) {
+		t.Fatal("the edited last turn did not take the injection")
+	}
+}
+
+// Unrelated Sessions do not move an active Session's injection. Adapted from
+// review sol-1 (TestSolCapacityEvictionMustNotMoveExistingInjection), where a
+// full cache cleared every live entry; the store now forgets only its least
+// recently used Session past the bound.
+func TestClaudeCloakSessionUnrelatedTrafficDoesNotMoveAnInjection(t *testing.T) {
+	resetCloakLineage(t)
+	const session = "lin-capacity-live"
+	linSend(t, session, linBody(linUser("start"), linThinking("lin-c0"), linUser("q0")))
+	first := linSend(t, session, linBody(linBlock("lin-capacity"), linThinking("lin-c0"), linUser("q0"), linThinking("lin-c1"), linUser("anchored")))
+	for i := 0; i < 1000; i++ {
+		other := fmt.Sprintf("lin-capacity-other-%d", i)
+		linSend(t, other, linBody(linUser("start"), linThinking("lin-c0"), linUser("q0")))
+	}
+	next := linSend(t, session, linBody(linBlock("lin-capacity"), linThinking("lin-c0"), linUser("q0"), linThinking("lin-c1"), linUser("anchored"), linThinking("lin-c2"), linUser("next")))
+	linAssertKept(t, "after 1000 unrelated Sessions", first, 0, next, 0, 5)
 }
