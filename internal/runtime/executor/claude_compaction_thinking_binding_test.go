@@ -7,13 +7,11 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	claudeauth "github.com/router-for-me/CLIProxyAPI/v8/internal/auth/claude"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
-	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor/helps"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v8/sdk/translator"
@@ -52,12 +50,11 @@ type forwardedPixirRequest struct {
 }
 
 // forwardPixirCompactionSequence replays the recording through ExecuteStream
-// with a fresh in-memory anchor memo. beforeEach, when set, runs before every
+// with fresh in-memory cloak state. beforeEach, when set, runs before every
 // request, for example to model a proxy restart.
 func forwardPixirCompactionSequence(t *testing.T, sessionHeader string, beforeEach func()) []forwardedPixirRequest {
 	t.Helper()
-	previous := helps.SetClaudeCloakAnchors(helps.NewClaudeCloakAnchorMemo(""))
-	t.Cleanup(func() { helps.SetClaudeCloakAnchors(previous) })
+	resetCloakLineage(t)
 	var captured []byte
 	transport := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
 		body, errRead := io.ReadAll(req.Body)
@@ -163,23 +160,27 @@ type thinkingBinding struct {
 // cloak re-anchored its date reminder and relocated system message on the
 // first kept user turn after each swap, which the live API reported as 7 of 8
 // and 7 of 7 kept blocks dropped with prefix_binding_mismatch.
+//
+// The caller names its Session with X-Session-ID, as Pixir does on this route;
+// the proxy keeps each Session's lineage under that name.
 func TestClaudeCloakKeepsCompactionKeptThinkingBound(t *testing.T) {
-	assertPixirKeptThinkingBound(t, forwardPixirCompactionSequence(t, "", nil))
+	assertPixirKeptThinkingBound(t, forwardPixirCompactionSequence(t, pixirSessionHeader, nil))
 }
+
+const pixirSessionHeader = "pixir-session-0123456789abcdef"
 
 // TestClaudeCloakKeepsCompactionKeptThinkingBoundAcrossRestarts replays the
 // same recording with a proxy restart before every request: each request sees
-// a new memo that only has what the previous ones wrote to its file. A second
-// process sharing the file is the same case.
+// new state that only has what the previous ones wrote to disk. A second
+// process sharing the directory is the same case.
 func TestClaudeCloakKeepsCompactionKeptThinkingBoundAcrossRestarts(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "claude-cloak-anchors.json")
-	forwarded := forwardPixirCompactionSequence(t, "", func() {
-		helps.SetClaudeCloakAnchors(helps.NewClaudeCloakAnchorMemo(path))
+	dir := t.TempDir()
+	forwarded := forwardPixirCompactionSequence(t, pixirSessionHeader, func() {
+		restartCloakLineage(t, dir)
 	})
 	assertPixirKeptThinkingBound(t, forwarded)
-	// The billing header and, on requests without a session key, the random
-	// metadata.user_id differ per process anyway; both are outside the check.
-	want := forwardPixirCompactionSequence(t, "", nil)
+	// The billing header differs per process anyway; it is outside the check.
+	want := forwardPixirCompactionSequence(t, pixirSessionHeader, nil)
 	for i := range want {
 		if gjson.GetBytes(forwarded[i].body, "messages").Raw != gjson.GetBytes(want[i].body, "messages").Raw {
 			t.Fatalf("tee #%d: forwarded messages differ between a restarting proxy and one that never restarts", want[i].tee)
@@ -284,7 +285,7 @@ func assertPixirKeptThinkingBound(t *testing.T, forwarded []forwardedPixirReques
 // hash of the first user and assistant texts, which the swap replaces, and a
 // compaction request whose kept messages carry no text has no key at all.
 func TestClaudeCloakSessionHeaderKeepsAffinityAndUserIDAcrossCompaction(t *testing.T) {
-	forwarded := forwardPixirCompactionSequence(t, "pixir-session-0123456789abcdef", nil)
+	forwarded := forwardPixirCompactionSequence(t, pixirSessionHeader, nil)
 
 	wantKey := cliproxyauth.CanonicalSessionID(forwarded[0].headers, forwarded[0].caller, nil)
 	wantUserID := gjson.GetBytes(forwarded[0].body, "metadata.user_id").String()
