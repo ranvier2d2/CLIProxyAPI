@@ -344,6 +344,7 @@ func checkSystemInstructionsWithSigningModeAt(
 ) []byte {
 	system := gjson.GetBytes(payload, "system")
 	messageText := claudeBillingFingerprintMessageText(payload)
+	anchors := planClaudeCloakAnchors(payload, now, true)
 
 	billingText := generateBillingHeader(cchSigning, version, messageText, entrypoint, workload, isSubagent, prevReq, promptID, turnOrigin...)
 	billingBlock := buildTextBlock(billingText, nil)
@@ -356,29 +357,30 @@ func checkSystemInstructionsWithSigningModeAt(
 	}
 	payload, _ = sjson.SetRawBytes(payload, "system", []byte("["+strings.Join(systemBlocks, ",")+"]"))
 	if strictMode {
-		return injectClaudeCodeCurrentDate(payload, now)
+		return injectClaudeCodeCurrentDate(payload, anchors)
 	}
 
 	forwardedSystemBlocks := collectForwardedClaudeSystemPromptBlocks(system)
 	if len(forwardedSystemBlocks) == 0 {
-		return injectClaudeCodeCurrentDate(payload, now)
+		return injectClaudeCodeCurrentDate(payload, anchors)
 	}
 	if claudeHistoryHasAdvisorCallOrResult(payload) {
 		for _, block := range forwardedSystemBlocks {
 			systemBlocks = append(systemBlocks, buildTextBlock(block, nil))
 		}
 		payload, _ = sjson.SetRawBytes(payload, "system", []byte("["+strings.Join(systemBlocks, ",")+"]"))
-		return injectClaudeCodeCurrentDate(payload, now)
+		return injectClaudeCodeCurrentDate(payload, anchors)
 	}
 	if claudeUsesLegacySystemReminder(payload) {
-		payload = prependClaudeSystemRemindersToFirstUserMessage(payload, forwardedSystemBlocks)
-	} else {
-		// Unknown and future model IDs optimistically use the authoritative
-		// mid-conversation system role. Only empirically unsupported legacy IDs
-		// stay on the user-reminder compatibility path.
-		payload = insertClaudeMidConversationSystemMessages(payload, forwardedSystemBlocks)
+		payload = prependClaudeSystemReminders(payload, forwardedSystemBlocks, anchors)
+		return injectClaudeCodeCurrentDate(payload, anchors)
 	}
-	return injectClaudeCodeCurrentDate(payload, now)
+	// Unknown and future model IDs optimistically use the authoritative
+	// mid-conversation system role. Only empirically unsupported legacy IDs
+	// stay on the user-reminder compatibility path. The date goes in first,
+	// while the anchors' indices still hold.
+	payload = injectClaudeCodeCurrentDate(payload, anchors)
+	return insertClaudeMidConversationSystemMessages(payload, forwardedSystemBlocks, anchors)
 }
 
 // relocateClaudeSystemPromptForCountTokens keeps a cloaked count_tokens request
@@ -420,10 +422,11 @@ func relocateClaudeSystemPromptForCountTokens(payload []byte, strictMode bool) [
 		return payload
 	}
 	payload = updated
+	anchors := planClaudeCloakAnchors(payload, time.Now(), false)
 	if claudeUsesLegacySystemReminder(payload) {
-		return prependClaudeSystemRemindersToFirstUserMessage(payload, forwardedSystemBlocks)
+		return prependClaudeSystemReminders(payload, forwardedSystemBlocks, anchors)
 	}
-	return insertClaudeMidConversationSystemMessages(payload, forwardedSystemBlocks)
+	return insertClaudeMidConversationSystemMessages(payload, forwardedSystemBlocks, anchors)
 }
 
 // claudeLegacySystemReminderModels lists the official Anthropic model IDs and
@@ -628,17 +631,21 @@ func marshalJSONStringWithoutHTMLEscape(value string) string {
 	return strings.TrimSuffix(encoded.String(), "\n")
 }
 
-func prependClaudeSystemRemindersToFirstUserMessage(payload []byte, texts []string) []byte {
-	anchorIdx := claudeCloakAnchorUserIndex(payload)
-	if anchorIdx < 0 || len(texts) == 0 {
+func prependClaudeSystemReminders(payload []byte, texts []string, anchors []claudeCloakAnchor) []byte {
+	if len(texts) == 0 {
 		return payload
 	}
-
 	reminderTexts := make([]string, 0, len(texts))
 	for _, text := range texts {
 		reminderTexts = append(reminderTexts, claudeCallerSystemReminder(text))
 	}
+	for _, anchor := range anchors {
+		payload = prependClaudeSystemRemindersAt(payload, reminderTexts, anchor.index)
+	}
+	return payload
+}
 
+func prependClaudeSystemRemindersAt(payload []byte, reminderTexts []string, anchorIdx int) []byte {
 	contentPath := fmt.Sprintf("messages.%d.content", anchorIdx)
 	content := gjson.GetBytes(payload, contentPath)
 	if content.IsArray() {
@@ -746,12 +753,19 @@ func claudeHistoryHasAdvisorCallOrResult(payload []byte) bool {
 	return false
 }
 
-func insertClaudeMidConversationSystemMessages(payload []byte, texts []string) []byte {
-	anchorIdx := claudeCloakAnchorUserIndex(payload)
-	if anchorIdx < 0 || len(texts) == 0 {
+// insertClaudeMidConversationSystemMessages inserts the caller's system blocks
+// after each anchor, last anchor first so earlier indices stay valid.
+func insertClaudeMidConversationSystemMessages(payload []byte, texts []string, anchors []claudeCloakAnchor) []byte {
+	if len(texts) == 0 {
 		return payload
 	}
+	for i := len(anchors) - 1; i >= 0; i-- {
+		payload = insertClaudeMidConversationSystemMessagesAt(payload, texts, anchors[i].index)
+	}
+	return payload
+}
 
+func insertClaudeMidConversationSystemMessagesAt(payload []byte, texts []string, anchorIdx int) []byte {
 	messages := gjson.GetBytes(payload, "messages")
 	if !messages.IsArray() {
 		return payload
@@ -816,15 +830,24 @@ func claudeMessageContentText(content gjson.Result) string {
 // if one is paired with a legacy model, validateClaudeMidSystemMessageModel must
 // still return 400 instead of silently rewriting the caller's wire.
 type claudeCodeSystemPlacementState struct {
+	runs  []claudeCodeSystemPlacementRun
+	texts []string
+}
+
+// claudeCodeSystemPlacementRun is one contiguous set of inserted turns and the
+// anchor they follow, both as indices into the cloaked messages.
+type claudeCodeSystemPlacementRun struct {
+	anchor      int
 	insertAt    int
 	insertedRaw []string
-	texts       []string
 }
 
 // captureClaudeCodeSystemPlacement records CPA's modern-model system placement
 // immediately after cloaking. The message-count increase is part of the proof:
 // insertClaudeMidConversationSystemMessages returns without inserting when the
 // same turns already exist, and those pre-existing turns belong to the caller.
+// The anchors are planned again without recording; cloaking has just recorded
+// them, so the plan is the one cloaking applied.
 func captureClaudeCodeSystemPlacement(before, after []byte, cloaked bool) claudeCodeSystemPlacementState {
 	if !cloaked || claudeUsesLegacySystemReminder(before) {
 		return claudeCodeSystemPlacementState{}
@@ -834,36 +857,34 @@ func captureClaudeCodeSystemPlacement(before, after []byte, cloaked bool) claude
 		return claudeCodeSystemPlacementState{}
 	}
 
+	anchors := planClaudeCloakAnchors(before, time.Now(), false)
 	beforeMessages := gjson.GetBytes(before, "messages").Array()
 	afterMessages := gjson.GetBytes(after, "messages").Array()
-	if len(afterMessages) != len(beforeMessages)+len(texts) {
+	if len(anchors) == 0 || len(afterMessages) != len(beforeMessages)+len(anchors)*len(texts) {
 		return claudeCodeSystemPlacementState{}
 	}
-	anchorIdx := claudeCloakAnchorUserIndex(before)
-	if anchorIdx < 0 {
-		return claudeCodeSystemPlacementState{}
-	}
-	insertAt := anchorIdx + 1
-	for insertAt < len(beforeMessages) && beforeMessages[insertAt].Get("role").String() == "user" {
-		insertAt++
-	}
-	if insertAt+len(texts) > len(afterMessages) {
-		return claudeCodeSystemPlacementState{}
-	}
-
-	insertedRaw := make([]string, len(texts))
-	for idx, text := range texts {
-		message := afterMessages[insertAt+idx]
-		if message.Get("role").String() != "system" || claudeMessageContentText(message.Get("content")) != text {
+	runs := make([]claudeCodeSystemPlacementRun, 0, len(anchors))
+	for i, anchor := range anchors {
+		insertAt := anchor.index + 1
+		for insertAt < len(beforeMessages) && beforeMessages[insertAt].Get("role").String() == "user" {
+			insertAt++
+		}
+		shift := i * len(texts)
+		insertAt += shift
+		if insertAt+len(texts) > len(afterMessages) {
 			return claudeCodeSystemPlacementState{}
 		}
-		insertedRaw[idx] = message.Raw
+		insertedRaw := make([]string, len(texts))
+		for idx, text := range texts {
+			message := afterMessages[insertAt+idx]
+			if message.Get("role").String() != "system" || claudeMessageContentText(message.Get("content")) != text {
+				return claudeCodeSystemPlacementState{}
+			}
+			insertedRaw[idx] = message.Raw
+		}
+		runs = append(runs, claudeCodeSystemPlacementRun{anchor: anchor.index + shift, insertAt: insertAt, insertedRaw: insertedRaw})
 	}
-	return claudeCodeSystemPlacementState{
-		insertAt:    insertAt,
-		insertedRaw: insertedRaw,
-		texts:       append([]string(nil), texts...),
-	}
+	return claudeCodeSystemPlacementState{runs: runs, texts: append([]string(nil), texts...)}
 }
 
 // reconcileClaudeCodeSystemPlacementAfterPayload repairs an otherwise stale
@@ -873,31 +894,36 @@ func captureClaudeCodeSystemPlacement(before, after []byte, cloaked bool) claude
 // rule also changed those messages, reconciliation fails closed and leaves the
 // final validation guard to return 400.
 func reconcileClaudeCodeSystemPlacementAfterPayload(payload []byte, state claudeCodeSystemPlacementState) []byte {
-	if len(state.insertedRaw) == 0 || !claudeUsesLegacySystemReminder(payload) {
+	if len(state.runs) == 0 || !claudeUsesLegacySystemReminder(payload) {
 		return payload
 	}
 	messages := gjson.GetBytes(payload, "messages").Array()
-	if state.insertAt < 0 || state.insertAt+len(state.insertedRaw) > len(messages) {
-		return payload
-	}
-	for idx, raw := range state.insertedRaw {
-		if messages[state.insertAt+idx].Raw != raw {
+	inserted := make(map[int]bool)
+	anchors := make([]claudeCloakAnchor, 0, len(state.runs))
+	for i, run := range state.runs {
+		if run.insertAt < 0 || run.insertAt+len(run.insertedRaw) > len(messages) {
 			return payload
 		}
+		for idx, raw := range run.insertedRaw {
+			if messages[run.insertAt+idx].Raw != raw {
+				return payload
+			}
+			inserted[run.insertAt+idx] = true
+		}
+		anchors = append(anchors, claudeCloakAnchor{index: run.anchor - i*len(state.texts)})
 	}
 
-	rawMessages := make([]string, 0, len(messages)-len(state.insertedRaw))
+	rawMessages := make([]string, 0, len(messages)-len(inserted))
 	for idx, message := range messages {
-		if idx >= state.insertAt && idx < state.insertAt+len(state.insertedRaw) {
-			continue
+		if !inserted[idx] {
+			rawMessages = append(rawMessages, message.Raw)
 		}
-		rawMessages = append(rawMessages, message.Raw)
 	}
 	updated, errSet := sjson.SetRawBytes(payload, "messages", []byte("["+strings.Join(rawMessages, ",")+"]"))
 	if errSet != nil {
 		return payload
 	}
-	return prependClaudeSystemRemindersToFirstUserMessage(updated, state.texts)
+	return prependClaudeSystemReminders(updated, state.texts, anchors)
 }
 
 type claudeCodeFableState struct {
@@ -1118,6 +1144,10 @@ func claudeCredentialTimezone(auth *cliproxyauth.Auth) string {
 }
 
 func claudeCodeCurrentDateReminder(now time.Time) string {
+	return claudeCodeDateReminder(claudeCodeLocalDate(now))
+}
+
+func claudeCodeDateReminder(date string) string {
 	return fmt.Sprintf(`<system-reminder>
 As you answer the user's questions, you can use the following context:
 # currentDate
@@ -1126,7 +1156,7 @@ Today's date is %s.
       IMPORTANT: this context may or may not be relevant to your tasks. You should not respond to this context unless it is highly relevant to your task.
 </system-reminder>
 
-`, claudeCodeLocalDate(now))
+`, date)
 }
 
 func firstClaudeUserMessageIndex(payload []byte) int {
@@ -1146,55 +1176,6 @@ func firstClaudeUserMessageIndex(payload []byte) int {
 	return firstUserIdx
 }
 
-// claudeCloakAnchorUserIndex returns the user message that carries the cloak's
-// date reminder and after which the relocated caller system prompt goes.
-//
-// Without a compaction block that is the first user message. With one, the
-// API checks kept thinking against the prefix starting at the newest block, and
-// the turns after it were already sent without injections, so any edit there
-// drops their thinking (prefix_binding_mismatch). The anchor then is the first
-// new user turn after the kept turns: the last user message of the first
-// request that carries the block, remembered per block so later requests of
-// the same epoch, including the next compaction request, place it identically.
-// A compaction request never establishes an anchor, because its trailing turns
-// are kept turns of the previous block.
-func claudeCloakAnchorUserIndex(payload []byte) int {
-	messages := gjson.GetBytes(payload, "messages").Array()
-	head, signature := -1, ""
-	for idx, message := range messages {
-		for _, block := range message.Get("content").Array() {
-			if block.Get("type").String() == "compaction" {
-				head, signature = idx, block.Get("signature").String()
-			}
-		}
-	}
-	if head < 0 || signature == "" {
-		return firstClaudeUserMessageIndex(payload)
-	}
-	isUser := func(idx int) bool {
-		return idx > head && idx < len(messages) && messages[idx].Get("role").String() == "user"
-	}
-	if offset, ok := helps.LookupClaudeCompactionAnchorOffset(signature); ok {
-		if isUser(head + offset) {
-			return head + offset
-		}
-		return -1
-	}
-	if gjson.GetBytes(payload, "compaction").Exists() {
-		return -1
-	}
-	for idx := len(messages) - 1; idx > head; idx-- {
-		if isUser(idx) {
-			anchor := head + helps.RememberClaudeCompactionAnchorOffset(signature, idx-head)
-			if isUser(anchor) {
-				return anchor
-			}
-			return -1
-		}
-	}
-	return -1
-}
-
 func isClaudeCodeContextReminder(text string) bool {
 	return strings.HasPrefix(text, "<system-reminder>") && strings.Contains(text, "</system-reminder>")
 }
@@ -1203,16 +1184,17 @@ func isClaudeCodeCurrentDateReminder(text string) bool {
 	return strings.HasPrefix(text, "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# currentDate\nToday's date is ")
 }
 
-func injectClaudeCodeCurrentDate(payload []byte, now time.Time) []byte {
-	anchorIdx := claudeCloakAnchorUserIndex(payload)
-	if anchorIdx < 0 {
-		return payload
+func injectClaudeCodeCurrentDate(payload []byte, anchors []claudeCloakAnchor) []byte {
+	for _, anchor := range anchors {
+		payload = injectClaudeCodeDateReminderAt(payload, anchor.index, anchor.date)
 	}
+	return payload
+}
 
+func injectClaudeCodeDateReminderAt(payload []byte, anchorIdx int, date string) []byte {
 	contentPath := fmt.Sprintf("messages.%d.content", anchorIdx)
 	content := gjson.GetBytes(payload, contentPath)
-	dateText := claudeCodeCurrentDateReminder(now)
-	dateBlock := buildTextBlock(dateText, nil)
+	dateBlock := buildTextBlock(claudeCodeDateReminder(date), nil)
 
 	if content.Type == gjson.String {
 		userBlock := buildTextBlock(content.String(), &claudeCodeCacheControl)
