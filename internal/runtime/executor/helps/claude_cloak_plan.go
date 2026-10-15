@@ -102,7 +102,9 @@ type ClaudeCloakPlan struct {
 // compaction block after the lineage has one, or one whose newest block is a
 // block of the lineage or of an earlier epoch. It gets main's placement, the
 // plan names it non_forward, and the lineage stays for the Session's next
-// request.
+// request. The Session never forgets an earlier epoch's block, but it may
+// take a new one for one (see claudeCloakRetiredBlocks); that swap and the
+// rest of its epoch then get main's placement the same way.
 //
 // Every aligned message keeps the anchor and date it had; a new last user turn
 // gets a fresh one, dated today, only when no aligned anchor follows the
@@ -274,8 +276,8 @@ func (r claudeCloakRequest) place(sessioned, known bool, previous claudeCloakLin
 }
 
 // retireClaudeCloakBlocks returns previous's retired blocks plus the blocks
-// of previous that next no longer holds, the newest claudeCloakRetiredBlocks.
-func retireClaudeCloakBlocks(previous claudeCloakLineage, next []ClaudeCloakLineageMessage) []string {
+// of previous that next no longer holds.
+func retireClaudeCloakBlocks(previous claudeCloakLineage, next []ClaudeCloakLineageMessage) claudeCloakRetired {
 	held := make(map[string]bool)
 	for _, message := range next {
 		if message.Compaction {
@@ -285,10 +287,10 @@ func retireClaudeCloakBlocks(previous claudeCloakLineage, next []ClaudeCloakLine
 	retired := previous.Retired
 	for _, message := range previous.Messages {
 		if message.Compaction && !held[message.Hash] {
-			retired = append(retired[:len(retired):len(retired)], message.Hash)
+			retired.add(message.Hash)
 		}
 	}
-	return retired[max(0, len(retired)-claudeCloakRetiredBlocks):]
+	return retired
 }
 
 // keepsCut reports whether the request leaves previous's pending cut in
@@ -325,7 +327,7 @@ func (r claudeCloakRequest) align(previous claudeCloakLineage) ([]ClaudeCloakLin
 
 	// Only a swap leaves the epoch, and a swap brings a block the Session has
 	// not had.
-	if head < 0 || claudeCloakBlockSeen(messages[head].Hash, previous) {
+	if head < 0 || claudeCloakBlockSeen(messages[head].Hash, &previous) {
 		return nil, nil, ClaudeCloakFallbackNonForward
 	}
 
@@ -410,18 +412,13 @@ func (r claudeCloakRequest) placeAnchors(view []ClaudeCloakLineageMessage, align
 	return anchors
 }
 
-func claudeCloakBlockSeen(hash string, lineage claudeCloakLineage) bool {
+func claudeCloakBlockSeen(hash string, lineage *claudeCloakLineage) bool {
 	for _, message := range lineage.Messages {
 		if message.Compaction && message.Hash == hash {
 			return true
 		}
 	}
-	for _, retired := range lineage.Retired {
-		if retired == hash {
-			return true
-		}
-	}
-	return false
+	return lineage.Retired.holds(hash)
 }
 
 func claudeCloakCommonPrefix(messages []claudeCloakMessage, previous []ClaudeCloakLineageMessage) int {
