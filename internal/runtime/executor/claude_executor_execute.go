@@ -94,7 +94,8 @@ func (e *ClaudeExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, r
 	bodyBeforeCloaking := body
 	isProbeOrHelper := helps.IsClaudeProbeOrHelperRequest(bodyBeforeCloaking)
 	var cloaked bool
-	body, cloaked, err = applyCloakingInternal(
+	var cloakAnchors []helps.ClaudeCloakAnchor
+	body, cloakAnchors, cloaked, err = applyCloakingInternal(
 		ctx,
 		e.cfg,
 		auth,
@@ -107,7 +108,7 @@ func (e *ClaudeExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, r
 	if err != nil {
 		return resp, err
 	}
-	systemPlacementState := captureClaudeCodeSystemPlacement(bodyBeforeCloaking, body, cloaked)
+	systemPlacementState := captureClaudeCodeSystemPlacement(bodyBeforeCloaking, body, cloaked, cloakAnchors)
 	fableState := captureClaudeCodeFableState(bodyBeforeCloaking, body, cloaked)
 	// Only the Messages endpoint on Anthropic itself was captured; count_tokens
 	// keeps its own shape and other gateways never see this field.
