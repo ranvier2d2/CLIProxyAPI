@@ -2,6 +2,7 @@ package helps
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"sync"
 	"sync/atomic"
@@ -36,29 +37,73 @@ type ClaudeCloakLineageMessage struct {
 
 // claudeCloakLineage is a Session's lineage: the transcript the caller holds,
 // as the cloak forwarded it; the cut of a pending compaction request, the
-// position its next swap keeps the turns from (0 for none); and the hashes of
-// the compaction blocks of the Session's earlier epochs, newest last. Rev
-// changes on every write and is 0 for a Session the store does not know; a
-// write lands only on the revision it was planned against.
+// position its next swap keeps the turns from (0 for none); and the
+// compaction blocks of the Session's earlier epochs. Rev changes on every
+// write and is 0 for a Session the store does not know; a write lands only on
+// the revision it was planned against.
 type claudeCloakLineage struct {
 	Rev      uint64
 	Cut      int
 	Messages []ClaudeCloakLineageMessage
-	Retired  []string
+	Retired  claudeCloakRetired
 }
 
-// claudeCloakRetiredBlocks bounds how many earlier epochs a Session
-// recognizes a retry from.
-const claudeCloakRetiredBlocks = 64
+// A Session's retired blocks are a Bloom filter of 8,192 bits probed 22 times
+// per block. With n blocks in it, a block it does not hold reads as held with
+// probability (1 - e^(-22n/8192))^22, 2.1e-7 at n = 256. Past 256 blocks the
+// filter reads every block as held, so the Session's later swaps get main's
+// placement and the bound on that probability holds for the Session's life.
+const (
+	claudeCloakRetiredBlocks = 256
+	claudeCloakRetiredBits   = 8192
+	claudeCloakRetiredProbes = 22
+)
+
+// claudeCloakRetired holds every compaction block a Session's earlier epochs
+// had. It never forgets one, so a retry from any earlier epoch reads as one;
+// it may read a block it does not hold as held, which only ever costs that
+// request main's placement.
+type claudeCloakRetired struct {
+	bits   [claudeCloakRetiredBits / 64]uint64
+	blocks int
+}
+
+func (f *claudeCloakRetired) add(hash string) {
+	f.blocks++
+	for _, bit := range claudeCloakRetiredBitsOf(hash) {
+		f.bits[bit/64] |= 1 << (bit % 64)
+	}
+}
+
+func (f *claudeCloakRetired) holds(hash string) bool {
+	if f.blocks >= claudeCloakRetiredBlocks {
+		return true
+	}
+	for _, bit := range claudeCloakRetiredBitsOf(hash) {
+		if f.bits[bit/64]&(1<<(bit%64)) == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// claudeCloakRetiredBitsOf derives a block's probes by double hashing; the
+// step is odd, so the probes are distinct bits.
+func claudeCloakRetiredBitsOf(hash string) [claudeCloakRetiredProbes]uint64 {
+	sum := sha256.Sum256([]byte("cpa-claude-cloak-retired\x00" + hash))
+	h1, h2 := binary.LittleEndian.Uint64(sum[:8]), binary.LittleEndian.Uint64(sum[8:16])|1
+	var bits [claudeCloakRetiredProbes]uint64
+	for i := range bits {
+		bits[i] = (h1 + uint64(i)*h2) % claudeCloakRetiredBits
+	}
+	return bits
+}
 
 // size is what the lineage counts against the byte bounds.
 func (l claudeCloakLineage) size() int {
-	n := 64
+	n := 64 + claudeCloakRetiredBits/8
 	for _, message := range l.Messages {
 		n += len(message.Hash) + len(message.Date) + 16
-	}
-	for _, hash := range l.Retired {
-		n += len(hash) + 16
 	}
 	return n
 }
