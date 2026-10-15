@@ -1727,17 +1727,17 @@ func applyCloakingInternal(
 	cchSigning bool,
 	obfuscateSensitiveWords bool,
 	explicitCacheMode ...bool,
-) ([]byte, []helps.ClaudeCloakAnchor, bool, error) {
+) ([]byte, helps.ClaudeCloakPlan, bool, error) {
 	policy, settings := resolveClaudeWirePolicy(cfg, auth, apiKey, confirmedClaudeCode)
 	if !policy.Cloak {
-		return payload, nil, false, nil
+		return payload, helps.ClaudeCloakPlan{}, false, nil
 	}
 	isExplicit := (len(explicitCacheMode) > 0 && explicitCacheMode[0]) || isExplicitPromptCacheModeContext(ctx)
 	// Strict mode drops caller system prompts entirely, so nothing needs a
 	// destination and an unusable block cannot lose information.
 	if !settings.strictMode {
 		if errSystem := validateClaudeCallerSystemBlocks(gjson.GetBytes(payload, "system")); errSystem != nil {
-			return nil, nil, false, errSystem
+			return nil, helps.ClaudeCloakPlan{}, false, errSystem
 		}
 	}
 
@@ -1836,7 +1836,7 @@ func applyCloakingInternal(
 		var errFakeUserID error
 		payload, errFakeUserID = injectFakeUserID(ctx, payload, apiKey, settings.cacheUserID)
 		if errFakeUserID != nil {
-			return nil, nil, false, errFakeUserID
+			return nil, helps.ClaudeCloakPlan{}, false, errFakeUserID
 		}
 	}
 
@@ -1846,10 +1846,7 @@ func applyCloakingInternal(
 		payload = helps.ObfuscateSensitiveWords(payload, matcher)
 	}
 
-	if !isProbeOrHelper {
-		plan.Commit()
-	}
-	return payload, plan.Anchors, true, nil
+	return payload, plan, true, nil
 }
 
 type claudeCacheControl struct {

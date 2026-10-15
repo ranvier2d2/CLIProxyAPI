@@ -106,7 +106,8 @@ func (e *ClaudeExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 		ctx = withExplicitPromptCacheMode(ctx, true)
 	}
 	var cloaked bool
-	body, _, cloaked, err = applyCloakingInternal(
+	var cloakPlan helps.ClaudeCloakPlan
+	body, cloakPlan, cloaked, err = applyCloakingInternal(
 		ctx,
 		e.cfg,
 		auth,
@@ -329,6 +330,9 @@ func (e *ClaudeExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 		}
 		return nil, classifyClaudeUpstreamErrorWithCooling(httpResp.StatusCode, httpResp.Header, b, e.modelLevelCooling())
 	}
+	// The upstream accepted the request, so what the cloak forwarded becomes
+	// the Session's lineage.
+	cloakPlan.Commit()
 	decodedBody, err := decodeResponseBody(httpResp.Body, claudeResponseContentEncoding(httpResp.Header))
 	if err != nil {
 		helps.RecordAPIResponseError(ctx, e.cfg, err)

@@ -70,10 +70,12 @@ func linSend(t *testing.T, session string, body []byte) linForwarded {
 		headers.Set("X-Session-ID", session)
 		ctx = helps.WithIncomingHeaders(ctx, headers)
 	}
-	out, cloaked, errCloak := applyCloaking(ctx, &config.Config{}, directClaudeOAuthAuth(), body, "sk-ant-oat-direct-messages-test", false, true)
+	out, plan, cloaked, errCloak := applyCloakingInternal(ctx, &config.Config{}, directClaudeOAuthAuth(), body, "sk-ant-oat-direct-messages-test", false, true, true)
 	if errCloak != nil || !cloaked {
 		t.Fatalf("applyCloaking: cloaked=%v err=%v", cloaked, errCloak)
 	}
+	// The upstream accepts every request in these tests.
+	plan.Commit()
 	return linView(t, body, out)
 }
 

@@ -82,3 +82,27 @@ func TestClaudeCloakLineageOversizedSessionIsDroppedAndCounted(t *testing.T) {
 		}
 	})
 }
+
+// Two identical requests planned against the same lineage both commit: the
+// later one plans again against the earlier one's lineage, gets the same
+// placement, and writes it. Nothing is counted stale.
+func TestClaudeCloakLineageStalePlanWithTheSamePlacementCommits(t *testing.T) {
+	forEachLineageBacking(t, func(t *testing.T, dir string) {
+		old := SetClaudeCloakLineages(NewClaudeCloakLineageStore(dir))
+		t.Cleanup(func() { SetClaudeCloakLineages(old) })
+		const sid, today = "same-placement", "2026-10-15"
+		PlanClaudeCloak(sol3Body(sol3User("start"), sol3Assistant("a0"), sol3User("q0")), sid, today).Commit()
+		swap := sol3Body(sol3Block("c1"), sol3Assistant("a0"), sol3User("q0"), sol3Assistant("a1"), sol3User("new"))
+		first, second := PlanClaudeCloak(swap, sid, today), PlanClaudeCloak(swap, sid, today)
+		before := ClaudeCloakLineageFallbacks(ClaudeCloakRecoveryStale)
+		first.Commit()
+		second.Commit()
+		if got := ClaudeCloakLineageFallbacks(ClaudeCloakRecoveryStale); got != before {
+			t.Fatalf("an agreeing duplicate counted %d stale", got-before)
+		}
+		current, _ := ClaudeCloakLineages().load(claudeCloakLineageKey(sid))
+		if current.Messages[4].Date != today || current.Rev == first.read.Rev {
+			t.Fatalf("lineage after both commits: %+v", current)
+		}
+	})
+}
