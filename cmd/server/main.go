@@ -32,6 +32,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/pluginhost"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/redisqueue"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor/helps"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/safemode"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/store"
 	_ "github.com/router-for-me/CLIProxyAPI/v8/internal/translator"
@@ -651,6 +652,9 @@ func main() {
 	}
 	githubauth.SetToken(cfg.GitHubToken)
 	managementasset.SetCurrentConfig(cfg)
+	// Cloaked Claude conversations stay bound to their kept thinking across
+	// restarts only if the proxy remembers where it injected.
+	helps.SetClaudeCloakAnchors(helps.NewClaudeCloakAnchorMemo(helps.ClaudeCloakAnchorMemoPath()))
 
 	// Create login options to be used in authentication flows.
 	options := &cmd.LoginOptions{

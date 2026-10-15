@@ -4139,11 +4139,11 @@ func TestInjectClaudeCodeCurrentDateIsIdempotentAndAlignsFirstUserCache(t *testi
 	fixed := time.Date(2026, time.August, 1, 9, 0, 0, 0, time.FixedZone("UTC+8", 8*60*60))
 	payload := []byte(`{"messages":[{"role":"user","content":[{"type":"text","text":"hello","cache_control":{"type":"ephemeral","ttl":"1h"}}]}]}`)
 
-	first := injectClaudeCodeCurrentDate(payload, claudeCodeLocalDate(fixed))
+	first := injectClaudeCodeCurrentDate(payload, planClaudeCloakAnchors(payload, fixed, false))
 	if !bytes.Contains(first, []byte(`<system-reminder>`)) || bytes.Contains(first, []byte(`\u003csystem-reminder`)) {
 		t.Fatalf("currentDate angle brackets must match JSON.stringify bytes: %s", first)
 	}
-	second := injectClaudeCodeCurrentDate(first, claudeCodeLocalDate(fixed))
+	second := injectClaudeCodeCurrentDate(first, planClaudeCloakAnchors(first, fixed, false))
 	if !bytes.Equal(first, second) {
 		t.Fatalf("currentDate injection is not idempotent:\nfirst:  %s\nsecond: %s", first, second)
 	}
@@ -4279,7 +4279,7 @@ func TestInjectClaudeCodeCurrentDateMovesExistingCopyToFirstBlock(t *testing.T) 
 	payload := []byte(`{"messages":[{"role":"user","content":[` +
 		`{"type":"text","text":"hello"},` + dateBlock + `]}]}`)
 
-	out := injectClaudeCodeCurrentDate(payload, claudeCodeLocalDate(fixed))
+	out := injectClaudeCodeCurrentDate(payload, planClaudeCloakAnchors(payload, fixed, false))
 	content := gjson.GetBytes(out, "messages.0.content").Array()
 	if len(content) != 2 {
 		t.Fatalf("content has %d blocks, want one currentDate and user text: %s", len(content), out)
@@ -4295,7 +4295,7 @@ func TestInjectClaudeCodeCurrentDatePrecedesExistingReminder(t *testing.T) {
 		buildTextBlock(reminder, nil) + `,` +
 		`{"type":"text","text":"continue","cache_control":{"type":"ephemeral","ttl":"1h"}}]}]}`)
 
-	out := injectClaudeCodeCurrentDate(payload, claudeCodeLocalDate(fixed))
+	out := injectClaudeCodeCurrentDate(payload, planClaudeCloakAnchors(payload, fixed, false))
 	content := gjson.GetBytes(out, "messages.0.content").Array()
 	if len(content) != 3 {
 		t.Fatalf("content has %d blocks, want currentDate, reminder, and user text: %s", len(content), out)
@@ -4315,8 +4315,8 @@ func TestInjectClaudeCodeCurrentDateFollowsLeadingToolResults(t *testing.T) {
 		`{"type":"tool_result","tool_use_id":"toolu_1","content":"ok"},` +
 		`{"type":"text","text":"continue"}]}]}`)
 
-	first := injectClaudeCodeCurrentDate(payload, claudeCodeLocalDate(fixed))
-	second := injectClaudeCodeCurrentDate(first, claudeCodeLocalDate(fixed))
+	first := injectClaudeCodeCurrentDate(payload, planClaudeCloakAnchors(payload, fixed, false))
+	second := injectClaudeCodeCurrentDate(first, planClaudeCloakAnchors(first, fixed, false))
 	if !bytes.Equal(first, second) {
 		t.Fatalf("currentDate injection is not idempotent:\nfirst:  %s\nsecond: %s", first, second)
 	}
@@ -4345,7 +4345,7 @@ func TestInjectClaudeCodeCurrentDateFollowsAllLeadingToolResults(t *testing.T) {
 		`{"type":"tool_result","tool_use_id":"toolu_1","content":"ok"},` +
 		`{"type":"tool_result","tool_use_id":"toolu_2","content":"ok"}]}]}`)
 
-	out := injectClaudeCodeCurrentDate(payload, claudeCodeLocalDate(fixed))
+	out := injectClaudeCodeCurrentDate(payload, planClaudeCloakAnchors(payload, fixed, false))
 	content := gjson.GetBytes(out, "messages.1.content").Array()
 	if len(content) != 3 {
 		t.Fatalf("content has %d blocks, want two tool_results and currentDate: %s", len(content), out)
@@ -8258,8 +8258,8 @@ func TestPrependClaudeSystemReminders_FollowsToolResultsAndIsIdempotent(t *testi
 		`]}`)
 
 	texts := []string{"first guidance", "second guidance"}
-	first := prependClaudeSystemRemindersToFirstUserMessage(payload, texts)
-	second := prependClaudeSystemRemindersToFirstUserMessage(first, texts)
+	first := prependClaudeSystemReminders(payload, texts, planClaudeCloakAnchors(payload, time.Now(), false))
+	second := prependClaudeSystemReminders(first, texts, planClaudeCloakAnchors(first, time.Now(), false))
 	if !bytes.Equal(first, second) {
 		t.Fatalf("caller reminder insertion is not idempotent:\nfirst:  %s\nsecond: %s", first, second)
 	}
@@ -8286,7 +8286,7 @@ func TestInsertClaudeMidConversationSystemMessages_FollowsToolResultUserTurn(t *
 		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"ok"}]}` +
 		`]}`)
 
-	out := insertClaudeMidConversationSystemMessages(payload, []string{"guidance"})
+	out := insertClaudeMidConversationSystemMessages(payload, []string{"guidance"}, planClaudeCloakAnchors(payload, time.Now(), false))
 	if got := gjson.GetBytes(out, "messages.#").Int(); got != 3 {
 		t.Fatalf("message count = %d, want 3: %s", got, out)
 	}
@@ -8307,7 +8307,7 @@ func TestInsertClaudeMidConversationSystemMessages_PrecedesExistingAssistantTurn
 		`{"role":"user","content":"continue"}` +
 		`]}`)
 
-	out := insertClaudeMidConversationSystemMessages(payload, []string{"guidance"})
+	out := insertClaudeMidConversationSystemMessages(payload, []string{"guidance"}, planClaudeCloakAnchors(payload, time.Now(), false))
 	roles := gjson.GetBytes(out, "messages.#.role").Array()
 	wantRoles := []string{"user", "system", "assistant", "user"}
 	if len(roles) != len(wantRoles) {
@@ -8328,7 +8328,7 @@ func TestInsertClaudeMidConversationSystemMessages_FollowsConsecutiveUserRun(t *
 		`{"role":"assistant","content":"answer"}` +
 		`]}`)
 
-	out := insertClaudeMidConversationSystemMessages(payload, []string{"guidance"})
+	out := insertClaudeMidConversationSystemMessages(payload, []string{"guidance"}, planClaudeCloakAnchors(payload, time.Now(), false))
 	roles := gjson.GetBytes(out, "messages.#.role").Array()
 	wantRoles := []string{"user", "user", "system", "assistant"}
 	if len(roles) != len(wantRoles) {
@@ -8345,8 +8345,8 @@ func TestInsertClaudeMidConversationSystemMessages_FollowsConsecutiveUserRun(t *
 func TestInsertClaudeMidConversationSystemMessages_IsIdempotent(t *testing.T) {
 	payload := []byte(`{"messages":[{"role":"user","content":"hello"}]}`)
 	texts := []string{"first guidance", "second guidance"}
-	first := insertClaudeMidConversationSystemMessages(payload, texts)
-	second := insertClaudeMidConversationSystemMessages(first, texts)
+	first := insertClaudeMidConversationSystemMessages(payload, texts, planClaudeCloakAnchors(payload, time.Now(), false))
+	second := insertClaudeMidConversationSystemMessages(first, texts, planClaudeCloakAnchors(first, time.Now(), false))
 	if !bytes.Equal(first, second) {
 		t.Fatalf("mid-conversation system insertion is not idempotent:\nfirst:  %s\nsecond: %s", first, second)
 	}
