@@ -101,7 +101,7 @@ func TestClaudeCloakLineageStalePlanWithTheSamePlacementCommits(t *testing.T) {
 			t.Fatalf("an agreeing duplicate counted %d stale", got-before)
 		}
 		current, _ := ClaudeCloakLineages().load(claudeCloakLineageKey(sid))
-		if current.Messages[4].Date != today || current.Rev == first.read.Rev {
+		if current.Messages[4].Date != today || current.Rev == first.expect {
 			t.Fatalf("lineage after both commits: %+v", current)
 		}
 	})

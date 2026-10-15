@@ -650,7 +650,10 @@ func main() {
 	managementasset.SetCurrentConfig(cfg)
 	// Cloaked Claude Sessions stay bound to their kept thinking across restarts
 	// only if the proxy remembers what it forwarded.
-	helps.SetClaudeCloakLineages(helps.NewClaudeCloakLineageStore(helps.ClaudeCloakLineageDir()))
+	cloakLineages := helps.NewClaudeCloakLineageStore(helps.ClaudeCloakLineageDir())
+	helps.SetClaudeCloakLineages(cloakLineages)
+	// Lineages still queued for the disk are written before the process exits.
+	defer cloakLineages.Flush()
 
 	// Create login options to be used in authentication flows.
 	options := &cmd.LoginOptions{

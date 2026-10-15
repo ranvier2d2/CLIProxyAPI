@@ -11,10 +11,13 @@ import (
 	"time"
 )
 
-func newTestClaudeCloakLineageStore(dir string, now *time.Time, maxSessions int) *ClaudeCloakLineageStore {
+// newTestClaudeCloakLineageStore returns a store on a test clock whose
+// queued writes finish before the test's directory is removed.
+func newTestClaudeCloakLineageStore(t *testing.T, dir string, now *time.Time, maxSessions int) *ClaudeCloakLineageStore {
 	s := NewClaudeCloakLineageStore(dir)
 	s.now = func() time.Time { return *now }
 	s.limits.sessions = maxSessions
+	t.Cleanup(s.Flush)
 	return s
 }
 
@@ -29,8 +32,11 @@ func testSave(t *testing.T, s *ClaudeCloakLineageStore, key string, messages []C
 
 var testLineage = []ClaudeCloakLineageMessage{{Hash: "h0", Compaction: true}, {Hash: "h1", Date: "2026-10-15"}}
 
+// assertLineage checks what a request of key would read once the store's
+// queued writes reached the disk.
 func assertLineage(t *testing.T, s *ClaudeCloakLineageStore, key string, want bool) {
 	t.Helper()
+	s.Flush()
 	got, ok := s.load(key)
 	if ok != want {
 		t.Fatalf("session %s found=%v, want %v", key, ok, want)
@@ -50,7 +56,7 @@ func forEachLineageBacking(t *testing.T, run func(t *testing.T, dir string)) {
 func TestClaudeCloakLineageLifetimeSlidesWithUse(t *testing.T) {
 	forEachLineageBacking(t, func(t *testing.T, dir string) {
 		now := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
-		s := newTestClaudeCloakLineageStore(dir, &now, 8)
+		s := newTestClaudeCloakLineageStore(t, dir, &now, 8)
 		testSave(t, s, "live", testLineage)
 		for day := 1; day <= 60; day++ {
 			now = now.Add(24 * time.Hour)
@@ -69,7 +75,7 @@ func TestClaudeCloakLineageLifetimeSlidesWithUse(t *testing.T) {
 func TestClaudeCloakLineageEvictsOnlyTheLeastRecentlyUsed(t *testing.T) {
 	forEachLineageBacking(t, func(t *testing.T, dir string) {
 		now := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
-		s := newTestClaudeCloakLineageStore(dir, &now, 4)
+		s := newTestClaudeCloakLineageStore(t, dir, &now, 4)
 		for i := 0; i < 4; i++ {
 			now = now.Add(time.Minute)
 			testSave(t, s, fmt.Sprintf("s%d", i), testLineage)
@@ -96,7 +102,7 @@ func TestClaudeCloakLineageUnreadableFileIsUnknown(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
 			now := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
-			s := newTestClaudeCloakLineageStore(dir, &now, 8)
+			s := newTestClaudeCloakLineageStore(t, dir, &now, 8)
 			if errWrite := os.WriteFile(filepath.Join(dir, "k.json"), []byte(raw), 0o600); errWrite != nil {
 				t.Fatal(errWrite)
 			}
@@ -108,17 +114,19 @@ func TestClaudeCloakLineageUnreadableFileIsUnknown(t *testing.T) {
 }
 
 // A restart, or a second process over the same directory, reads what the
-// other wrote last. The files hold hashes and dates, never the caller's
-// Session id or message content.
+// other wrote last, once it reached the disk. The files hold hashes and dates,
+// never the caller's Session id or message content.
 func TestClaudeCloakLineageSharedDirectory(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "lineage")
 	now := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
-	a := newTestClaudeCloakLineageStore(dir, &now, 8)
-	b := newTestClaudeCloakLineageStore(dir, &now, 8)
+	a := newTestClaudeCloakLineageStore(t, dir, &now, 8)
+	b := newTestClaudeCloakLineageStore(t, dir, &now, 8)
 	key := claudeCloakLineageKey("pixir-session-secret-name")
 	testSave(t, a, key, testLineage)
+	a.Flush()
 	assertLineage(t, b, key, true)
 	testSave(t, b, key, testLineage[:1])
+	b.Flush()
 	if got, _ := a.load(key); len(got.Messages) != 1 {
 		t.Fatalf("process A reads %d messages, want process B's 1", len(got.Messages))
 	}
@@ -140,17 +148,21 @@ func TestClaudeCloakLineageSharedDirectory(t *testing.T) {
 
 // Writers of one Session that read the same revision race to write the next
 // one: exactly one wins and the others see its lineage, within one process
-// and across stores sharing a directory.
+// and across stores sharing a directory. Within a store the race is decided in
+// memory. Across stores each may admit one writer in memory, and the disk
+// decides: exactly one of those writes lands, every other one is counted
+// stale, and both stores then read the one that landed.
 func TestClaudeCloakLineageConcurrentWritersOneRevisionWins(t *testing.T) {
 	forEachLineageBacking(t, func(t *testing.T, dir string) {
 		now := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
-		stores := []*ClaudeCloakLineageStore{newTestClaudeCloakLineageStore(dir, &now, 64)}
+		stores := []*ClaudeCloakLineageStore{newTestClaudeCloakLineageStore(t, dir, &now, 64)}
 		if dir != "" {
-			stores = append(stores, newTestClaudeCloakLineageStore(dir, &now, 64))
+			stores = append(stores, newTestClaudeCloakLineageStore(t, dir, &now, 64))
 		}
 		for round := 0; round < 20; round++ {
 			key := fmt.Sprintf("w%d", round%4)
 			read, _ := stores[0].load(key)
+			staleBefore := ClaudeCloakLineageFallbacks(ClaudeCloakRecoveryStale)
 			var wg sync.WaitGroup
 			var mu sync.Mutex
 			won := 0
@@ -173,8 +185,16 @@ func TestClaudeCloakLineageConcurrentWritersOneRevisionWins(t *testing.T) {
 				}(worker)
 			}
 			wg.Wait()
-			if won != 1 {
-				t.Fatalf("round %d: %d writers won the same revision", round, won)
+			for _, s := range stores {
+				s.Flush()
+			}
+			if landed := int64(won) - (ClaudeCloakLineageFallbacks(ClaudeCloakRecoveryStale) - staleBefore); won < 1 || won > len(stores) || landed != 1 {
+				t.Fatalf("round %d: %d writers won the same revision and %d landed", round, won, landed)
+			}
+			first, _ := stores[0].load(key)
+			last, _ := stores[len(stores)-1].load(key)
+			if first.Rev != last.Rev {
+				t.Fatalf("round %d: the stores read different revisions", round)
 			}
 		}
 	})
@@ -185,7 +205,7 @@ func TestClaudeCloakLineageConcurrentWritersOneRevisionWins(t *testing.T) {
 func TestClaudeCloakLineageTotalBudgetEvictsLeastRecentlyUsed(t *testing.T) {
 	forEachLineageBacking(t, func(t *testing.T, dir string) {
 		now := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
-		s := newTestClaudeCloakLineageStore(dir, &now, 64)
+		s := newTestClaudeCloakLineageStore(t, dir, &now, 64)
 		messages := make([]ClaudeCloakLineageMessage, 100)
 		for i := range messages {
 			messages[i] = ClaudeCloakLineageMessage{Hash: fmt.Sprintf("%032x", i)}
@@ -196,6 +216,7 @@ func TestClaudeCloakLineageTotalBudgetEvictsLeastRecentlyUsed(t *testing.T) {
 			now = now.Add(time.Minute)
 			testSave(t, s, fmt.Sprintf("s%d", i), messages)
 		}
+		s.Flush()
 		for i := 0; i < 5; i++ {
 			_, ok := s.load(fmt.Sprintf("s%d", i))
 			if ok != (i >= 2) {

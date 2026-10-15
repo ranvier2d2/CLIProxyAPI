@@ -24,14 +24,16 @@ const (
 const (
 	// ClaudeCloakRecoveryStale: the request was planned against a lineage
 	// another request of the Session has since replaced, and planning it again
-	// against the newer one gives a different placement. The newer lineage
-	// stays.
+	// against the newer one gives a different placement; or another process
+	// sharing the state directory wrote the Session's file first. The newer
+	// lineage stays.
 	ClaudeCloakRecoveryStale = "stale"
 	// ClaudeCloakRecoveryOversize: the request is past the per-Session cap, so
 	// the Session's lineage is dropped.
 	ClaudeCloakRecoveryOversize = "oversize"
-	// ClaudeCloakRecoveryUnwritten: the store could not record the lineage, so
-	// the Session's lineage is dropped.
+	// ClaudeCloakRecoveryUnwritten: the store could not write the lineage to
+	// disk, or forgot it before writing it. The process keeps using what it
+	// holds in memory; a restart sees the Session as the disk last held it.
 	ClaudeCloakRecoveryUnwritten = "unwritten"
 )
 
@@ -54,10 +56,10 @@ type ClaudeCloakPlan struct {
 	Fallback string
 	key      string
 	request  claudeCloakRequest
-	// read is the lineage the plan was made against; next is what Commit
+	// expect is the revision the plan was made against; next is what Commit
 	// writes in its place.
-	read claudeCloakLineage
-	next claudeCloakLineage
+	expect uint64
+	next   claudeCloakLineage
 }
 
 // PlanClaudeCloak decides which caller user messages carry the cloak's
@@ -77,7 +79,12 @@ type ClaudeCloakPlan struct {
 //   - Compaction request: a request with a top-level compaction field, or one
 //     that repeats only a prefix of what the caller holds. It summarizes that
 //     prefix, so it leaves the rest of the lineage in place and records the
-//     cut: the next swap keeps the turns from the cut on.
+//     cut: the next swap keeps the turns from the cut on. Only that swap
+//     consumes the cut and only another compaction request replaces it; any
+//     other request that repeats the summarized prefix (an unchanged resend,
+//     a retry, an appended or edited later turn) keeps it. A request that
+//     changes the summarized prefix replaces the history the cut points into
+//     and clears it.
 //   - Swap after a compaction request: [new block, kept turns, new turns]. The
 //     kept turns align, by position, with the lineage from the cut. When that
 //     request is itself a compaction request carrying the new block, before
@@ -97,12 +104,14 @@ type ClaudeCloakPlan struct {
 // The plan reads the lineage; only Commit writes it.
 func PlanClaudeCloak(payload []byte, sessionID, today string) ClaudeCloakPlan {
 	plan := ClaudeCloakPlan{request: parseClaudeCloakRequest(payload, today)}
+	var read claudeCloakLineage
 	known := false
 	if sessionID != "" {
 		plan.key = claudeCloakLineageKey(sessionID)
-		plan.read, known = ClaudeCloakLineages().load(plan.key)
+		read, known = ClaudeCloakLineages().load(plan.key)
 	}
-	plan.Anchors, plan.Fallback, plan.next = plan.request.place(plan.key != "", known, plan.read)
+	plan.expect = read.Rev
+	plan.Anchors, plan.Fallback, plan.next = plan.request.place(plan.key != "", known, read)
 	return plan
 }
 
@@ -113,9 +122,10 @@ func PlanClaudeCloak(payload []byte, sessionID, today string) ClaudeCloakPlan {
 // The write is a compare-and-swap on the Session's revision. When another
 // request of the Session committed after this plan read the lineage, the
 // request is planned again against the newer lineage: if that gives the same
-// placement, the bytes forwarded are the ones the newer lineage implies and
-// the new plan commits; if not, the newer lineage stays and the conflict is
-// counted as stale.
+// placement and a lineage within the per-Session caps, the bytes forwarded are
+// the ones the newer lineage implies and the new plan commits; if not, the
+// newer lineage stays and the conflict is counted as stale. Only a request
+// planned at the current revision can drop its Session for its size.
 func (p ClaudeCloakPlan) Commit() {
 	if p.Fallback != "" {
 		countClaudeCloakLineageFallback(p.Fallback)
@@ -129,7 +139,7 @@ func (p ClaudeCloakPlan) Commit() {
 		return
 	}
 	store := ClaudeCloakLineages()
-	expect, next := p.read.Rev, p.next
+	expect, next := p.expect, p.next
 	for attempt := 1; ; attempt++ {
 		current, known, outcome := store.swap(p.key, expect, next)
 		switch outcome {
@@ -144,7 +154,8 @@ func (p ClaudeCloakPlan) Commit() {
 			return
 		}
 		anchors, _, replanned := p.request.place(true, known, current)
-		if attempt == claudeCloakCommitAttempts || !equalClaudeCloakAnchors(anchors, p.Anchors) {
+		raw, errEncode := store.encode(replanned, store.now())
+		if attempt == claudeCloakCommitAttempts || !equalClaudeCloakAnchors(anchors, p.Anchors) || errEncode != nil || store.exceeds(replanned, raw) {
 			countClaudeCloakLineageFallback(ClaudeCloakRecoveryStale)
 			log.Infof("claude cloak: a request planned against an older lineage of its Session conflicts with a newer one; the newer lineage stays")
 			return
@@ -239,10 +250,24 @@ func (r claudeCloakRequest) place(sessioned, known bool, previous claudeCloakLin
 	for _, anchor := range anchors {
 		next.Messages[anchor.Index].Date = anchor.Date
 	}
-	if prefix || r.compaction {
+	switch {
+	case prefix || r.compaction:
 		next.Cut = len(r.messages)
+	case fallback == "" && r.keepsCut(previous):
+		next.Cut = previous.Cut
 	}
 	return anchors, fallback, next
+}
+
+// keepsCut reports whether the request leaves previous's pending cut in
+// place: it stays within the lineage's epoch and repeats the summarized
+// prefix, so the swap the cut waits for is still to come.
+func (r claudeCloakRequest) keepsCut(previous claudeCloakLineage) bool {
+	if previous.Cut == 0 {
+		return false
+	}
+	common := claudeCloakCommonPrefix(r.messages, previous.Messages)
+	return (r.head < 0 || common > r.head) && common >= previous.Cut
 }
 
 // align lines the request up against the transcript the caller holds, view,

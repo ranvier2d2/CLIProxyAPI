@@ -284,6 +284,7 @@ func TestClaudeCloakSessionCountTokensNeverWrites(t *testing.T) {
 	toolUse := `{"role":"assistant","content":[{"type":"thinking","thinking":"t","signature":"lin-count-2"},{"type":"tool_use","id":"lin-tool-1","name":"read_file","input":{}}]}`
 	toolResult := `{"role":"user","content":[{"type":"tool_result","tool_use_id":"lin-tool-1","content":"ok"}]}`
 	linSend(t, session, linBody(linUser("start"), linThinking("lin-count-1"), linUser("old kept question"), toolUse, toolResult))
+	flushCloakLineage()
 	snapshot := linDirSnapshot(t, dir)
 
 	transport := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
@@ -302,6 +303,7 @@ func TestClaudeCloakSessionCountTokensNeverWrites(t *testing.T) {
 			t.Fatalf("count_tokens: %v", errCount)
 		}
 	}
+	flushCloakLineage()
 	if after := linDirSnapshot(t, dir); after != snapshot {
 		t.Fatalf("count_tokens changed the cloak state on disk:\nbefore %s\nafter  %s", snapshot, after)
 	}
