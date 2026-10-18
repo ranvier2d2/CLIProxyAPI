@@ -47,9 +47,9 @@ func LogClaudeRateLimitResponseHeaders(entry *log.Entry, headers http.Header) {
 		for _, value := range values {
 			// Quote upstream-controlled text so it cannot inject log lines.
 			if key == "retry-after" {
-				retryAfter = append(retryAfter, strconv.Quote(value))
+				retryAfter = append(retryAfter, quoteClaudeRateLimitHeaderValue(value))
 			} else {
-				rateHeaders = append(rateHeaders, key+"="+strconv.Quote(value))
+				rateHeaders = append(rateHeaders, key+"="+quoteClaudeRateLimitHeaderValue(value))
 			}
 		}
 	}
@@ -59,6 +59,26 @@ func LogClaudeRateLimitResponseHeaders(entry *log.Entry, headers http.Header) {
 		"rate_limit_headers": strings.Join(rateHeaders, ","),
 		"retry_after":        strings.Join(retryAfter, ","),
 	}).Info("Anthropic 429 rate limit response headers")
+}
+
+// quoteClaudeRateLimitHeaderValue caps the value at 512 bytes, including the
+// truncation marker, before escaping it. Quoting each item prevents line and
+// field injection, even when values contain commas, quotes or control bytes.
+func quoteClaudeRateLimitHeaderValue(value string) string {
+	const maxBytes = 512
+	if len(value) <= maxBytes {
+		return strconv.Quote(value)
+	}
+	omitted := len(value) - maxBytes
+	for {
+		marker := "<truncated " + strconv.Itoa(omitted) + " bytes>"
+		keep := maxBytes - len(marker)
+		if nextOmitted := len(value) - keep; nextOmitted != omitted {
+			omitted = nextOmitted
+			continue
+		}
+		return strconv.Quote(value[:keep] + marker)
+	}
 }
 
 func safeClaudeRateLimitHeader(name string) bool {

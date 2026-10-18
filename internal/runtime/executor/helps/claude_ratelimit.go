@@ -331,7 +331,7 @@ func parseClaudeRateLimitResetWithFuzzAndLogger(headers http.Header, now time.Ti
 		if len(rejectedWindows) > 0 {
 			entry.WithFields(log.Fields{
 				"rejected_windows": strings.Join(rejectedWindows, ","),
-				"status":           "fallback_exponential_backoff",
+				"ratelimit_status": "fallback_exponential_backoff",
 			}).Info("Anthropic rate limit window rejected; falling back to generic exponential backoff")
 		}
 		return nil
@@ -349,7 +349,7 @@ func parseClaudeRateLimitResetWithFuzzAndLogger(headers http.Header, now time.Ti
 		if len(rejectedWindows) > 0 {
 			entry.WithFields(log.Fields{
 				"rejected_windows": strings.Join(rejectedWindows, ","),
-				"status":           "fallback_exponential_backoff",
+				"ratelimit_status": "fallback_exponential_backoff",
 			}).Info("Anthropic rate limit window rejected; falling back to generic exponential backoff")
 		}
 		return nil

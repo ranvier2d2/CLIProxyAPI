@@ -59,27 +59,27 @@ var logFieldOrder = []string{
 	"credential", "auth_id", "auth_index", "auth_file", "connection", "proxy_scheme", "remote_transport",
 	"operation", "upstream_host", "reused", "was_idle", "idle_time",
 	"media_session_id", "call_id", "peer", "state", "reason",
-	"rejected_windows", "deadline", "base_cooldown", "effective_cooldown", "fuzz", "status",
+	"rejected_windows", "deadline", "base_cooldown", "effective_cooldown", "fuzz", "ratelimit_status",
 	"rate_limit_headers", "retry_after",
 }
 
 var quotedLogFields = map[string]struct{}{
-	"credential":         {},
-	"auth_id":            {},
-	"auth_file":          {},
-	"auth_index":         {},
-	"upstream_host":      {},
-	"operation":          {},
-	"connection":         {},
-	"proxy_scheme":       {},
-	"remote_transport":   {},
-	"media_session_id":   {},
-	"call_id":            {},
-	"peer":               {},
-	"state":              {},
-	"reason":             {},
-	"rate_limit_headers": {},
-	"retry_after":        {},
+	"credential":       {},
+	"auth_id":          {},
+	"auth_file":        {},
+	"auth_index":       {},
+	"upstream_host":    {},
+	"operation":        {},
+	"connection":       {},
+	"proxy_scheme":     {},
+	"remote_transport": {},
+	"media_session_id": {},
+	"call_id":          {},
+	"peer":             {},
+	"state":            {},
+	"reason":           {},
+	// rate_limit_headers and retry_after are already quoted per value by the
+	// Claude response-header logger. Do not quote the aggregate a second time.
 }
 
 var pluginPathFieldOrder = []string{"path", "active_path", "retired_path"}
