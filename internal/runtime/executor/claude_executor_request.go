@@ -812,6 +812,9 @@ func classifyClaudeUpstreamError(statusCode int, headers http.Header, body []byt
 }
 
 func classifyClaudeUpstreamErrorWithCooling(statusCode int, headers http.Header, body []byte, modelLevelCooling bool) error {
+	if statusCode == http.StatusTooManyRequests {
+		helps.LogClaudeRateLimitResponseHeaders(headers)
+	}
 	var retryAfter *time.Duration
 	if statusCode == http.StatusTooManyRequests || (statusCode >= 400 && statusCode < 600) {
 		retryAfter = helps.ParseClaudeRateLimitResetForError(headers, body, time.Now())
