@@ -6,7 +6,9 @@ import (
 	"time"
 )
 
-func TestClaudeAccountRateLimitMessageDoesNotInheritSeventyHourReset(t *testing.T) {
+// The actual response headers were not captured. This pins the incident's exact
+// message with synthetic quota-shaped headers, not a claim to fix the incident.
+func TestClaudeAccountRateLimitMessageStillInheritsSeventyHourReset(t *testing.T) {
 	headers := make(http.Header)
 	headers.Set("Retry-After", "30")
 	headers.Set("Anthropic-Ratelimit-Unified-Status", "rejected")
@@ -19,7 +21,7 @@ func TestClaudeAccountRateLimitMessageDoesNotInheritSeventyHourReset(t *testing.
 	}
 	got := *retry.RetryAfter()
 	t.Logf("exact incident message with synthetic quota headers: cooldown=%s", got)
-	if got < 30*time.Second || got > time.Minute {
-		t.Fatalf("30s Retry-After became %s; want 30s plus at most 30s fuzz", got)
+	if got < 70*time.Hour-time.Second || got > 70*time.Hour+30*time.Second {
+		t.Fatalf("conservative quota cooldown changed: got %s, want approximately 70h plus fuzz", got)
 	}
 }
