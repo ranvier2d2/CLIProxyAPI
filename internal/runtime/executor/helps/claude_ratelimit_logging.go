@@ -10,6 +10,7 @@ import (
 
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/net/http/httpguts"
 )
 
 // ClaudeRateLimitLogger correlates header and cooldown records with the request
@@ -30,34 +31,17 @@ func ClaudeRateLimitLogger(ctx context.Context, auth *cliproxyauth.Auth) *log.En
 	return entry
 }
 
-// LogClaudeRateLimitResponseHeaders records only known, non-secret rate-limit
-// response headers. Do not replace this allowlist with a prefix match or dump the
-// response headers: authentication material and unknown extensions must stay out.
+// LogClaudeRateLimitResponseHeaders records the unified rate-limit namespace,
+// known non-unified rate-limit headers and Retry-After. Auth-like extensions and
+// invalid header names are excluded even within the unified namespace.
 func LogClaudeRateLimitResponseHeaders(entry *log.Entry, headers http.Header) {
-	allowed := map[string]bool{
-		"anthropic-ratelimit-unified-status":                  true,
-		"anthropic-ratelimit-unified-reset":                   true,
-		"anthropic-ratelimit-unified-utilization":             true,
-		"anthropic-ratelimit-unified-representative-claim":    true,
-		"anthropic-ratelimit-unified-overage-status":          true,
-		"anthropic-ratelimit-unified-overage-reset":           true,
-		"anthropic-ratelimit-unified-overage-utilization":     true,
-		"anthropic-ratelimit-unified-overage-disabled-reason": true,
-	}
-	for _, window := range []string{"5h", "7d", "7d_oi"} {
-		for _, field := range []string{"status", "reset", "utilization"} {
-			allowed["anthropic-ratelimit-unified-"+window+"-"+field] = true
-		}
-	}
-	for _, window := range []string{"requests", "tokens", "input-tokens", "output-tokens"} {
-		for _, field := range []string{"limit", "remaining", "reset"} {
-			allowed["anthropic-ratelimit-"+window+"-"+field] = true
-		}
+	if entry == nil {
+		entry = log.NewEntry(log.StandardLogger())
 	}
 	var rateHeaders, retryAfter []string
 	for name, values := range headers {
 		key := strings.ToLower(name)
-		if !allowed[key] && key != "retry-after" {
+		if !safeClaudeRateLimitHeader(key) {
 			continue
 		}
 		for _, value := range values {
@@ -75,4 +59,33 @@ func LogClaudeRateLimitResponseHeaders(entry *log.Entry, headers http.Header) {
 		"rate_limit_headers": strings.Join(rateHeaders, ","),
 		"retry_after":        strings.Join(retryAfter, ","),
 	}).Info("Anthropic 429 rate limit response headers")
+}
+
+func safeClaudeRateLimitHeader(name string) bool {
+	if !httpguts.ValidHeaderFieldName(name) {
+		return false
+	}
+	const unifiedPrefix = "anthropic-ratelimit-unified-"
+	if strings.HasPrefix(name, unifiedPrefix) {
+		suffix := strings.TrimPrefix(name, unifiedPrefix)
+		// Do not let the extensible rate-limit namespace become a route for
+		// authentication headers. Token counters remain allowed only under
+		// the exact, known non-unified names below.
+		for _, sensitive := range []string{"auth", "cookie", "token", "key", "secret", "credential", "session", "password", "passwd", "bearer", "jwt", "signature"} {
+			if strings.Contains(suffix, sensitive) {
+				return false
+			}
+		}
+		return suffix != ""
+	}
+	switch name {
+	case "retry-after",
+		"anthropic-ratelimit-requests-limit", "anthropic-ratelimit-requests-remaining", "anthropic-ratelimit-requests-reset",
+		"anthropic-ratelimit-tokens-limit", "anthropic-ratelimit-tokens-remaining", "anthropic-ratelimit-tokens-reset",
+		"anthropic-ratelimit-input-tokens-limit", "anthropic-ratelimit-input-tokens-remaining", "anthropic-ratelimit-input-tokens-reset",
+		"anthropic-ratelimit-output-tokens-limit", "anthropic-ratelimit-output-tokens-remaining", "anthropic-ratelimit-output-tokens-reset":
+		return true
+	default:
+		return false
+	}
 }
