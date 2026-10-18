@@ -64,21 +64,21 @@ var logFieldOrder = []string{
 }
 
 var quotedLogFields = map[string]struct{}{
-	"credential":       {},
-	"auth_id":          {},
-	"auth_index":       {},
-	"upstream_host":    {},
-	"operation":        {},
-	"connection":       {},
-	"proxy_scheme":     {},
-	"remote_transport": {},
-	"media_session_id": {},
-	"call_id":          {},
-	"peer":             {},
-	"state":            {},
-	"reason":           {},
+	"credential":         {},
+	"auth_id":            {},
+	"auth_index":         {},
+	"upstream_host":      {},
+	"operation":          {},
+	"connection":         {},
+	"proxy_scheme":       {},
+	"remote_transport":   {},
+	"media_session_id":   {},
+	"call_id":            {},
+	"peer":               {},
+	"state":              {},
+	"reason":             {},
 	"rate_limit_headers": {},
-	"retry_after": {},
+	"retry_after":        {},
 }
 
 var pluginPathFieldOrder = []string{"path", "active_path", "retired_path"}

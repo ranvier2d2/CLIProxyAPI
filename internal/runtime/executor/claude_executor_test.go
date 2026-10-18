@@ -4215,13 +4215,13 @@ func TestInjectClaudeCodeCurrentDateStripsCallerReminderFromStringContent(t *tes
 	}
 	// Default injection keeps caller text verbatim (duplicate reminders),
 	// matching the pre-retention behavior byte for byte.
-	legacy := injectClaudeCodeCurrentDate(payload, "2026-08-01")
+	legacy := injectClaudeCodeCurrentDateInternal(payload, "2026-08-01", false)
 	if got := strings.Count(string(legacy), "Today's date is"); got != 2 {
 		t.Fatalf("legacy payload has %d date reminders, want 2: %s", got, legacy)
 	}
 	// Pre-stripping the caller reminder lets one injection leave a single
 	// canonical reminder plus the untouched user text.
-	stripped := injectClaudeCodeCurrentDate(stripFirstUserClaudeCodeCurrentDateReminder(payload), "2026-08-01")
+	stripped := injectClaudeCodeCurrentDateInternal(stripFirstUserClaudeCodeCurrentDateReminder(payload), "2026-08-01", false)
 	if got := strings.Count(string(stripped), "Today's date is"); got != 1 {
 		t.Fatalf("stripped payload has %d date reminders, want 1: %s", got, stripped)
 	}
@@ -4231,7 +4231,7 @@ func TestInjectClaudeCodeCurrentDateStripsCallerReminderFromStringContent(t *tes
 	// A caller reminder without the trailing blank lines is still stripped.
 	noTrailer := []byte(`{"messages":[{"role":"user","content":""}]}`)
 	noTrailer, _ = sjson.SetBytes(noTrailer, "messages.0.content", strings.TrimRight(claudeCodeCurrentDateReminder("2026-08-01"), "\n")+"hello")
-	strippedNoTrailer := injectClaudeCodeCurrentDate(stripFirstUserClaudeCodeCurrentDateReminder(noTrailer), "2026-08-01")
+	strippedNoTrailer := injectClaudeCodeCurrentDateInternal(stripFirstUserClaudeCodeCurrentDateReminder(noTrailer), "2026-08-01", false)
 	if got := strings.Count(string(strippedNoTrailer), "Today's date is"); got != 1 {
 		t.Fatalf("no-trailer payload has %d date reminders, want 1: %s", got, strippedNoTrailer)
 	}
@@ -4678,7 +4678,7 @@ func TestRelocateClaudeSystemPromptForCountTokens_SingleTerminalUserRelocatesSys
 		`{"type":"text","text":"caller guidance"}],` +
 		`"messages":[{"role":"user","content":"request"}]}`)
 
-	out := relocateClaudeSystemPromptForCountTokens(payload, false)
+	out := relocateClaudeSystemPromptForCountTokens(payload, false, "")
 	if gjson.GetBytes(out, "system").Exists() {
 		t.Fatalf("top-level system field should be removed: %s", out)
 	}
@@ -4694,7 +4694,7 @@ func TestRelocateClaudeSystemPromptForCountTokens_LeadingUserRunRelocatesSystemA
 		`"messages":[{"role":"user","content":"prompt"},{"role":"user","content":"context"},` +
 		`{"role":"assistant","content":"answer"},{"role":"user","content":"follow-up"}]}`)
 
-	out := relocateClaudeSystemPromptForCountTokens(payload, false)
+	out := relocateClaudeSystemPromptForCountTokens(payload, false, "")
 	if gjson.GetBytes(out, "system").Exists() {
 		t.Fatalf("top-level system field should be removed: %s", out)
 	}

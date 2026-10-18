@@ -522,7 +522,9 @@ func relocateClaudeSystemPromptForCountTokensWithPolicy(payload []byte, strictMo
 	}
 	payload = updated
 	sessionID := ""
-	if len(sessionIDs)>0 { sessionID = sessionIDs[0] }
+	if len(sessionIDs) > 0 {
+		sessionID = sessionIDs[0]
+	}
 	anchors := helps.PlanClaudeCloak(payload, sessionID, claudeCodeLocalDate(time.Now())).Anchors
 	if claudeUsesLegacySystemReminder(payload) {
 		return prependClaudeSystemReminderBlocks(payload, forwardedSystemBlocks, anchors, isExplicit)
@@ -743,6 +745,14 @@ func marshalJSONStringWithoutHTMLEscape(value string) string {
 	return strings.TrimSuffix(encoded.String(), "\n")
 }
 
+func prependClaudeSystemReminders(payload []byte, texts []string, anchors []helps.ClaudeCloakAnchor) []byte {
+	blocks := make([]forwardedClaudeSystemPromptBlock, 0, len(texts))
+	for _, text := range texts {
+		blocks = append(blocks, forwardedClaudeSystemPromptBlock{Text: text})
+	}
+	return prependClaudeSystemReminderBlocks(payload, blocks, anchors, false)
+}
+
 func prependClaudeSystemRemindersToFirstUserMessage(payload []byte, texts []string) []byte {
 	blocks := make([]forwardedClaudeSystemPromptBlock, 0, len(texts))
 	for _, text := range texts {
@@ -752,15 +762,15 @@ func prependClaudeSystemRemindersToFirstUserMessage(payload []byte, texts []stri
 }
 
 func prependClaudeSystemReminderBlocksToFirstUserMessage(payload []byte, blocks []forwardedClaudeSystemPromptBlock, isExplicit bool) []byte {
-    anchors := helps.PlanClaudeCloak(payload, "", claudeCodeLocalDate(time.Now())).Anchors
-    return prependClaudeSystemReminderBlocks(payload, blocks, anchors, isExplicit)
+	anchors := helps.PlanClaudeCloak(payload, "", claudeCodeLocalDate(time.Now())).Anchors
+	return prependClaudeSystemReminderBlocks(payload, blocks, anchors, isExplicit)
 }
 
 func prependClaudeSystemReminderBlocks(payload []byte, blocks []forwardedClaudeSystemPromptBlock, anchors []helps.ClaudeCloakAnchor, isExplicit bool) []byte {
-    for _, anchor := range anchors {
-        payload = prependClaudeSystemReminderBlocksAt(payload, blocks, anchor.Index, isExplicit)
-    }
-    return payload
+	for _, anchor := range anchors {
+		payload = prependClaudeSystemReminderBlocksAt(payload, blocks, anchor.Index, isExplicit)
+	}
+	return payload
 }
 
 func prependClaudeSystemReminderBlocksAt(payload []byte, blocks []forwardedClaudeSystemPromptBlock, anchorIdx int, isExplicit bool) []byte {
@@ -918,24 +928,27 @@ func claudeMidConversationSystemMessagesAtEnd(payload []byte) bool {
 	return insertAt == len(messageBlocks) || insertAt > firstUserIdx+1
 }
 
-func insertClaudeMidConversationSystemMessages(payload []byte, texts []string) []byte {
+func insertClaudeMidConversationSystemMessages(payload []byte, texts []string, planned ...[]helps.ClaudeCloakAnchor) []byte {
 	blocks := make([]forwardedClaudeSystemPromptBlock, 0, len(texts))
 	for _, text := range texts {
 		blocks = append(blocks, forwardedClaudeSystemPromptBlock{Text: text, CacheControl: &claudeCodeCacheControl})
+	}
+	if len(planned) > 0 {
+		return insertClaudeMidConversationSystemBlocksAtAnchors(payload, blocks, planned[0], false)
 	}
 	return insertClaudeMidConversationSystemBlocks(payload, blocks, false)
 }
 
 func insertClaudeMidConversationSystemBlocks(payload []byte, blocks []forwardedClaudeSystemPromptBlock, isExplicit bool) []byte {
-    anchors := helps.PlanClaudeCloak(payload, "", claudeCodeLocalDate(time.Now())).Anchors
-    return insertClaudeMidConversationSystemBlocksAtAnchors(payload, blocks, anchors, isExplicit)
+	anchors := helps.PlanClaudeCloak(payload, "", claudeCodeLocalDate(time.Now())).Anchors
+	return insertClaudeMidConversationSystemBlocksAtAnchors(payload, blocks, anchors, isExplicit)
 }
 
 func insertClaudeMidConversationSystemBlocksAtAnchors(payload []byte, blocks []forwardedClaudeSystemPromptBlock, anchors []helps.ClaudeCloakAnchor, isExplicit bool) []byte {
-    for i := len(anchors)-1; i >= 0; i-- {
-        payload = insertClaudeMidConversationSystemBlocksAt(payload, blocks, anchors[i].Index, isExplicit)
-    }
-    return payload
+	for i := len(anchors) - 1; i >= 0; i-- {
+		payload = insertClaudeMidConversationSystemBlocksAt(payload, blocks, anchors[i].Index, isExplicit)
+	}
+	return payload
 }
 
 func insertClaudeMidConversationSystemBlocksAt(payload []byte, blocks []forwardedClaudeSystemPromptBlock, anchorIdx int, isExplicit bool) []byte {
@@ -1468,15 +1481,15 @@ func resolveClaudeSessionPinnedDate(
 // one whenever continuity is available) so the reminder text cannot change
 // between requests of one session.
 func injectClaudeCodeCurrentDate(payload []byte, anchors []helps.ClaudeCloakAnchor, explicit ...bool) []byte {
-    isExplicit := len(explicit)>0 && explicit[0]
-    for _, anchor := range anchors {
-        payload = injectClaudeCodeDateReminderAt(payload, anchor.Index, anchor.Date, isExplicit)
-    }
-    return payload
+	isExplicit := len(explicit) > 0 && explicit[0]
+	for _, anchor := range anchors {
+		payload = injectClaudeCodeDateReminderAt(payload, anchor.Index, anchor.Date, isExplicit)
+	}
+	return payload
 }
 
 func injectClaudeCodeCurrentDateInternal(payload []byte, date string, isExplicit bool) []byte {
-    return injectClaudeCodeCurrentDate(payload, helps.PlanClaudeCloak(payload, "", date).Anchors, isExplicit)
+	return injectClaudeCodeCurrentDate(payload, helps.PlanClaudeCloak(payload, "", date).Anchors, isExplicit)
 }
 
 func injectClaudeCodeDateReminderAt(payload []byte, anchorIdx int, date string, isExplicit bool) []byte {
@@ -1784,7 +1797,7 @@ func applyCloakingInternal(
 	if isExplicit {
 		turnOriginArgs = append(turnOriginArgs, "explicit_cache_mode")
 	}
-		// A caller that names its Session keeps every message it was forwarded
+	// A caller that names its Session keeps every message it was forwarded
 	// before; probes and helpers share the name but not the conversation.
 	sessionID := ""
 	if !isProbeOrHelper {

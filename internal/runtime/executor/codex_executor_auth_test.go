@@ -678,8 +678,8 @@ func TestCodexExecutorUseSIWCExecuteAndStream(t *testing.T) {
 	if !codexUseSIWC(auth) {
 		t.Fatal("expected codexUseSIWC(auth) == true")
 	}
-	if !codexWebsocketsEnabled(auth) {
-		t.Fatal("expected codexWebsocketsEnabled(auth) == true when use_siwc is true and websockets is enabled")
+	if !codexWebsocketsEnabled(auth, false) {
+		t.Fatal("expected codexWebsocketsEnabled(auth, false) == true when use_siwc is true and websockets is enabled")
 	}
 	// Default baseURL when base_url attribute is empty must be https://api.openai.com/v1
 	authDefaultURL := auth.Clone()

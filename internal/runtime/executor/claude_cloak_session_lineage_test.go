@@ -341,7 +341,7 @@ func TestClaudeCloakWithoutSessionHeaderMatchesMain(t *testing.T) {
 	digest := func(cases [][]byte) string {
 		h := sha256.New()
 		for _, body := range cases {
-			h.Write(checkSystemInstructionsWithSigningModeAt(body, false, false, "2.1.280", "cli", "", at, false, "", ""))
+			h.Write(checkSystemInstructionsWithSigningModeAt(body, false, false, "2.1.280", "cli", "", claudeCodeLocalDate(at), false, "", "", false))
 			h.Write(relocateClaudeSystemPromptForCountTokens(body, false, ""))
 		}
 		return hex.EncodeToString(h.Sum(nil))

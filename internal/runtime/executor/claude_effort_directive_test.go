@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
@@ -105,14 +106,14 @@ func TestCaptureClaudeCodeSystemPlacement_EffortDirective(t *testing.T) {
 		`{"role":"system","content":[],"output_config":{"effort":"low"}},` +
 		`{"role":"user","content":"next"},` +
 		`{"role":"system","content":[{"type":"text","text":"guidance"}]}]}`)
-	state := captureClaudeCodeSystemPlacement(before, after, true)
-	if state.insertAt != 3 || len(state.insertedRaw) != 1 || len(state.texts) != 1 {
+	state := captureClaudeCodeSystemPlacement(before, after, true, mainCloakAnchors(before, time.Now()))
+	if len(state.runs) != 1 || state.runs[0].insertAt != 3 || len(state.runs[0].insertedRaw) != 1 || len(state.texts) != 1 {
 		t.Fatalf("placement = %+v, want one inserted guidance turn at index 3", state)
 	}
-	if state.insertedRaw[0] != gjson.GetBytes(after, "messages.3").Raw || state.texts[0] != "guidance" {
+	if state.runs[0].insertedRaw[0] != gjson.GetBytes(after, "messages.3").Raw || state.texts[0] != "guidance" {
 		t.Fatalf("placement captured the wrong turn: %+v", state)
 	}
-	if callerOwned := captureClaudeCodeSystemPlacement(before, before, true); len(callerOwned.insertedRaw) != 0 {
+	if callerOwned := captureClaudeCodeSystemPlacement(before, before, true, mainCloakAnchors(before, time.Now())); len(callerOwned.runs) != 0 {
 		t.Fatalf("placement must not claim caller-owned turns: %+v", callerOwned)
 	}
 }
