@@ -138,16 +138,22 @@ var claudeQuotaStatusHeaders = []string{
 // Retry-After is a single unambiguous value usable by the downstream deadline
 // filter. Every other input keeps the conservative header-only result.
 func ParseClaudeRateLimitResetForError(headers http.Header, body []byte, now time.Time) *time.Duration {
+	return ParseClaudeRateLimitResetForErrorWithLogger(headers, body, now, log.NewEntry(log.StandardLogger()))
+}
+
+// ParseClaudeRateLimitResetForErrorWithLogger preserves the body-aware parser's
+// behavior while attaching the caller's request and auth identity to its decision.
+func ParseClaudeRateLimitResetForErrorWithLogger(headers http.Header, body []byte, now time.Time, entry *log.Entry) *time.Duration {
 	if headers == nil || !claudeBodyIsExplicitPerMinuteRateLimit(body) || claudeHeadersHaveQuotaStatus(headers) {
-		return ParseClaudeRateLimitReset(headers, now)
+		return parseClaudeRateLimitResetWithFuzzAndLogger(headers, now, defaultClaudeRateLimitFuzzMinSeconds, defaultClaudeRateLimitFuzzMaxSeconds, entry)
 	}
 	rawRetryAfter, ok := singleHeaderValueCaseInsensitive(headers, "Retry-After")
 	if !ok {
-		return ParseClaudeRateLimitReset(headers, now)
+		return parseClaudeRateLimitResetWithFuzzAndLogger(headers, now, defaultClaudeRateLimitFuzzMinSeconds, defaultClaudeRateLimitFuzzMaxSeconds, entry)
 	}
 	retryAt, okRetry := parseRetryAfterHeader(rawRetryAfter, now)
 	if !okRetry || !retryAt.After(now) || retryAt.Sub(now) > maxClaudeRateLimitWindow {
-		return ParseClaudeRateLimitReset(headers, now)
+		return parseClaudeRateLimitResetWithFuzzAndLogger(headers, now, defaultClaudeRateLimitFuzzMinSeconds, defaultClaudeRateLimitFuzzMaxSeconds, entry)
 	}
 	// Only the unclassified unified reset can stretch the cooldown here: every
 	// window-specific reset is consulted solely when its window is rejected.
@@ -157,7 +163,7 @@ func ParseClaudeRateLimitResetForError(headers http.Header, body []byte, now tim
 			delete(rateHeaders, name)
 		}
 	}
-	return ParseClaudeRateLimitReset(rateHeaders, now)
+	return parseClaudeRateLimitResetWithFuzzAndLogger(rateHeaders, now, defaultClaudeRateLimitFuzzMinSeconds, defaultClaudeRateLimitFuzzMaxSeconds, entry)
 }
 
 // claudeBodyIsExplicitPerMinuteRateLimit reports whether body is exactly one of the
@@ -228,6 +234,13 @@ func ParseClaudeRateLimitReset(headers http.Header, now time.Time) *time.Duratio
 }
 
 func parseClaudeRateLimitResetWithFuzz(headers http.Header, now time.Time, minFuzzSec, maxFuzzSec int) *time.Duration {
+	return parseClaudeRateLimitResetWithFuzzAndLogger(headers, now, minFuzzSec, maxFuzzSec, log.NewEntry(log.StandardLogger()))
+}
+
+func parseClaudeRateLimitResetWithFuzzAndLogger(headers http.Header, now time.Time, minFuzzSec, maxFuzzSec int, entry *log.Entry) *time.Duration {
+	if entry == nil {
+		entry = log.NewEntry(log.StandardLogger())
+	}
 	if headers == nil {
 		return nil
 	}
@@ -316,7 +329,7 @@ func parseClaudeRateLimitResetWithFuzz(headers http.Header, now time.Time, minFu
 	candidateDeadlines = filterClaudeRateLimitDeadlines(candidateDeadlines, now)
 	if len(candidateDeadlines) == 0 {
 		if len(rejectedWindows) > 0 {
-			log.WithFields(log.Fields{
+			entry.WithFields(log.Fields{
 				"rejected_windows": strings.Join(rejectedWindows, ","),
 				"status":           "fallback_exponential_backoff",
 			}).Info("Anthropic rate limit window rejected; falling back to generic exponential backoff")
@@ -334,7 +347,7 @@ func parseClaudeRateLimitResetWithFuzz(headers http.Header, now time.Time, minFu
 
 	if latestDeadline.IsZero() || !latestDeadline.After(now) {
 		if len(rejectedWindows) > 0 {
-			log.WithFields(log.Fields{
+			entry.WithFields(log.Fields{
 				"rejected_windows": strings.Join(rejectedWindows, ","),
 				"status":           "fallback_exponential_backoff",
 			}).Info("Anthropic rate limit window rejected; falling back to generic exponential backoff")
@@ -346,7 +359,7 @@ func parseClaudeRateLimitResetWithFuzz(headers http.Header, now time.Time, minFu
 	fuzz := randomClaudeFuzzDuration(minFuzzSec, maxFuzzSec)
 	effectiveDuration := baseDuration + fuzz
 
-	log.WithFields(log.Fields{
+	entry.WithFields(log.Fields{
 		"rejected_windows":   strings.Join(rejectedWindows, ","),
 		"effective_cooldown": effectiveDuration.String(),
 		"base_cooldown":      baseDuration.String(),

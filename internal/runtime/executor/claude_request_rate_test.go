@@ -33,7 +33,7 @@ func classifyClaudeRateTestError(t *testing.T, fast bool, headers http.Header, b
 	t.Helper()
 	var err error
 	if fast {
-		err = newClaudeFastDirectResponseError(&http.Response{StatusCode: http.StatusTooManyRequests, Header: headers}, body)
+		err = newClaudeFastDirectResponseError(nil, nil, &http.Response{StatusCode: http.StatusTooManyRequests, Header: headers}, body)
 	} else {
 		err = classifyClaudeUpstreamError(http.StatusTooManyRequests, headers, body)
 	}

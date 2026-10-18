@@ -102,14 +102,14 @@ func TestClassifyClaudeUpstreamError_ModelLevelCoolingForcesModelScope(t *testin
 	}
 
 	// Default cooling treats explicit 5h rejection as credential-scoped
-	errDefault := classifyClaudeUpstreamErrorWithCooling(http.StatusTooManyRequests, headers, []byte(`{"type":"error","error":{"type":"rate_limit_error"}}`), false)
+	errDefault := classifyClaudeUpstreamErrorWithCooling(nil, nil, http.StatusTooManyRequests, headers, []byte(`{"type":"error","error":{"type":"rate_limit_error"}}`), false)
 	var scopedDefault interface{ IsCredentialScoped() bool }
 	if !errors.As(errDefault, &scopedDefault) || !scopedDefault.IsCredentialScoped() {
 		t.Fatal("expected default cooling to treat 5h rejection as credential-scoped")
 	}
 
 	// With modelLevelCooling=true, it is model-scoped
-	errModelLevel := classifyClaudeUpstreamErrorWithCooling(http.StatusTooManyRequests, headers, []byte(`{"type":"error","error":{"type":"rate_limit_error"}}`), true)
+	errModelLevel := classifyClaudeUpstreamErrorWithCooling(nil, nil, http.StatusTooManyRequests, headers, []byte(`{"type":"error","error":{"type":"rate_limit_error"}}`), true)
 	var scopedModelLevel interface{ IsCredentialScoped() bool }
 	if !errors.As(errModelLevel, &scopedModelLevel) || scopedModelLevel.IsCredentialScoped() {
 		t.Fatal("expected modelLevelCooling=true to treat 5h rejection as model-scoped")

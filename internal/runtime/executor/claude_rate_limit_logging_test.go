@@ -42,7 +42,7 @@ func TestClaude429LogsOnlySafeRateLimitHeaders(t *testing.T) {
 	for _, fast := range []bool{false, true} {
 		output.Reset()
 		if fast {
-			_ = newClaudeFastDirectResponseError(&http.Response{StatusCode: http.StatusTooManyRequests, Header: headers}, body)
+			_ = newClaudeFastDirectResponseError(nil, nil, &http.Response{StatusCode: http.StatusTooManyRequests, Header: headers}, body)
 		} else {
 			_ = classifyClaudeUpstreamError(http.StatusTooManyRequests, headers, body)
 		}

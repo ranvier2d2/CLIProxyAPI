@@ -808,16 +808,17 @@ func (e claudeRateLimitError) IsRequestScoped() bool {
 // the whole Claude pool and cool down every credential, all of which remain
 // perfectly healthy for ordinary traffic. The refusal belongs to the request.
 func classifyClaudeUpstreamError(statusCode int, headers http.Header, body []byte) error {
-	return classifyClaudeUpstreamErrorWithCooling(statusCode, headers, body, false)
+	return classifyClaudeUpstreamErrorWithCooling(nil, nil, statusCode, headers, body, false)
 }
 
-func classifyClaudeUpstreamErrorWithCooling(statusCode int, headers http.Header, body []byte, modelLevelCooling bool) error {
+func classifyClaudeUpstreamErrorWithCooling(ctx context.Context, auth *cliproxyauth.Auth, statusCode int, headers http.Header, body []byte, modelLevelCooling bool) error {
+	entry := helps.ClaudeRateLimitLogger(ctx, auth)
 	if statusCode == http.StatusTooManyRequests {
-		helps.LogClaudeRateLimitResponseHeaders(headers)
+		helps.LogClaudeRateLimitResponseHeaders(entry, headers)
 	}
 	var retryAfter *time.Duration
 	if statusCode == http.StatusTooManyRequests || (statusCode >= 400 && statusCode < 600) {
-		retryAfter = helps.ParseClaudeRateLimitResetForError(headers, body, time.Now())
+		retryAfter = helps.ParseClaudeRateLimitResetForErrorWithLogger(headers, body, time.Now(), entry)
 	}
 	err := statusErr{code: statusCode, msg: string(body), retryAfter: retryAfter}
 	if statusCode == http.StatusTooManyRequests {

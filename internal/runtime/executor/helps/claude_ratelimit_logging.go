@@ -1,18 +1,39 @@
 package helps
 
 import (
+	"context"
 	"net/http"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 
+	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	log "github.com/sirupsen/logrus"
 )
+
+// ClaudeRateLimitLogger correlates header and cooldown records with the request
+// and the same auth-file basename used by the auth manager. It never logs auth
+// metadata, tokens, account details or host paths.
+func ClaudeRateLimitLogger(ctx context.Context, auth *cliproxyauth.Auth) *log.Entry {
+	entry := LogWithRequestID(ctx)
+	if auth == nil {
+		return entry
+	}
+	authFile := strings.TrimSpace(auth.FileName)
+	if authFile == "" {
+		authFile = strings.TrimSpace(auth.ID)
+	}
+	if authFile != "" {
+		entry = entry.WithField("auth_file", filepath.Base(authFile))
+	}
+	return entry
+}
 
 // LogClaudeRateLimitResponseHeaders records only known, non-secret rate-limit
 // response headers. Do not replace this allowlist with a prefix match or dump the
 // response headers: authentication material and unknown extensions must stay out.
-func LogClaudeRateLimitResponseHeaders(headers http.Header) {
+func LogClaudeRateLimitResponseHeaders(entry *log.Entry, headers http.Header) {
 	allowed := map[string]bool{
 		"anthropic-ratelimit-unified-status":                  true,
 		"anthropic-ratelimit-unified-reset":                   true,
@@ -50,7 +71,7 @@ func LogClaudeRateLimitResponseHeaders(headers http.Header) {
 	}
 	sort.Strings(rateHeaders)
 	sort.Strings(retryAfter)
-	log.WithFields(log.Fields{
+	entry.WithFields(log.Fields{
 		"rate_limit_headers": strings.Join(rateHeaders, ","),
 		"retry_after":        strings.Join(retryAfter, ","),
 	}).Info("Anthropic 429 rate limit response headers")

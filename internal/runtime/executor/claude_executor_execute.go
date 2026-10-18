@@ -315,7 +315,7 @@ func (e *ClaudeExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, r
 			helps.RecordAPIResponseError(ctx, e.cfg, decErr)
 			msg := fmt.Sprintf("failed to decode error response body: %v", decErr)
 			helps.LogWithRequestID(ctx).Warn(msg)
-			errClassified := classifyClaudeUpstreamErrorWithCooling(httpResp.StatusCode, httpResp.Header, []byte(msg), e.modelLevelCooling())
+			errClassified := classifyClaudeUpstreamErrorWithCooling(ctx, auth, httpResp.StatusCode, httpResp.Header, []byte(msg), e.modelLevelCooling())
 			if fastRequest {
 				return resp, wrapClaudeFastRequestError(fastRequest, httpResp.StatusCode, errClassified)
 			}
@@ -334,9 +334,9 @@ func (e *ClaudeExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, r
 			log.Errorf("response body close error: %v", errClose)
 		}
 		if fastRequest {
-			return resp, newClaudeFastDirectResponseError(httpResp, b)
+			return resp, newClaudeFastDirectResponseError(ctx, auth, httpResp, b)
 		}
-		return resp, classifyClaudeUpstreamErrorWithCooling(httpResp.StatusCode, httpResp.Header, b, e.modelLevelCooling())
+		return resp, classifyClaudeUpstreamErrorWithCooling(ctx, auth, httpResp.StatusCode, httpResp.Header, b, e.modelLevelCooling())
 	}
 	// The upstream accepted the request, so what the cloak forwarded becomes
 	// the Session's lineage.

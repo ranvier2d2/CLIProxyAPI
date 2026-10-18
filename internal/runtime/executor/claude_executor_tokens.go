@@ -284,7 +284,7 @@ func (e *ClaudeExecutor) countTokensUpstream(ctx context.Context, auth *cliproxy
 			helps.RecordAPIResponseError(ctx, e.cfg, decErr)
 			msg := fmt.Sprintf("failed to decode error response body: %v", decErr)
 			helps.LogWithRequestID(ctx).Warn(msg)
-			return cliproxyexecutor.Response{}, classifyClaudeUpstreamErrorWithCooling(resp.StatusCode, resp.Header, []byte(msg), e.modelLevelCooling())
+			return cliproxyexecutor.Response{}, classifyClaudeUpstreamErrorWithCooling(ctx, auth, resp.StatusCode, resp.Header, []byte(msg), e.modelLevelCooling())
 		}
 		b, readErr := io.ReadAll(errBody)
 		if readErr != nil {
@@ -297,7 +297,7 @@ func (e *ClaudeExecutor) countTokensUpstream(ctx context.Context, auth *cliproxy
 		if errClose := errBody.Close(); errClose != nil {
 			log.Errorf("response body close error: %v", errClose)
 		}
-		return cliproxyexecutor.Response{}, classifyClaudeUpstreamErrorWithCooling(resp.StatusCode, resp.Header, b, e.modelLevelCooling())
+		return cliproxyexecutor.Response{}, classifyClaudeUpstreamErrorWithCooling(ctx, auth, resp.StatusCode, resp.Header, b, e.modelLevelCooling())
 	}
 	decodedBody, err := decodeResponseBody(resp.Body, claudeResponseContentEncoding(resp.Header))
 	if err != nil {
