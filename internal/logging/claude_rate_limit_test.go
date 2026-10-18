@@ -16,7 +16,7 @@ func TestLogFormatterPrintsClaudeRateLimitDecisionFields(t *testing.T) {
 		"base_cooldown":      "70h0m0s",
 		"effective_cooldown": "70h0m1s",
 		"fuzz":               "1s",
-		"status":             "fallback_exponential_backoff",
+		"ratelimit_status":   "fallback_exponential_backoff",
 	}
 	formatted, err := (&LogFormatter{}).Format(entry)
 	if err != nil {
