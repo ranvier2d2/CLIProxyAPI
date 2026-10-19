@@ -106,7 +106,7 @@ func TestExecutorNativeStreamResponseTranslatorExistsRequiresStreamTransform(t *
 	}
 }
 
-func TestRegisterModelsRegistersProviderModelsAndClientID(t *testing.T) {
+func TestRegisterModelsRetainsCatalogWithoutPublishingClient(t *testing.T) {
 	modelRegistry := newFakeModelRegistry()
 	host := newHostWithRecords(capabilityRecord{
 		id:   "alpha",
@@ -152,10 +152,14 @@ func TestRegisterModelsRegistersProviderModelsAndClientID(t *testing.T) {
 
 	host.RegisterModels(context.Background(), modelRegistry)
 
-	reg := modelRegistry.clients["plugin:alpha:mixedprovider"]
-	if reg == nil {
-		t.Fatal("plugin:alpha:mixedprovider was not registered")
+	host.RegisterExecutors(newFakeExecutorManager(), modelRegistry)
+	if len(modelRegistry.clients) != 0 {
+		t.Fatalf("registered clients = %#v, want none without a routable credential", modelRegistry.clients)
 	}
+	if models := host.ModelsForProvider("mixedprovider"); len(models) != 1 || models[0].ID != "model-1" {
+		t.Fatalf("provider catalog = %#v, want model-1 for per-auth registration", models)
+	}
+	reg := host.modelRegistration("alpha")
 	if reg.provider != "mixedprovider" {
 		t.Fatalf("registered provider = %q, want mixedprovider", reg.provider)
 	}
@@ -230,17 +234,21 @@ func TestRegisterModelsUsesModelProviderStaticModels(t *testing.T) {
 	if !called {
 		t.Fatal("ModelProvider.StaticModels was not called")
 	}
-	reg := modelRegistry.clients["plugin:alpha:plugin-provider"]
-	if reg == nil {
-		t.Fatal("plugin:alpha:plugin-provider was not registered")
+	host.RegisterExecutors(newFakeExecutorManager(), modelRegistry)
+	if len(modelRegistry.clients) != 0 {
+		t.Fatalf("registered clients = %#v, want none without a routable credential", modelRegistry.clients)
 	}
+	if models := host.ModelsForProvider("plugin-provider"); len(models) != 1 || models[0].ID != "model-static" {
+		t.Fatalf("provider catalog = %#v, want model-static for per-auth registration", models)
+	}
+	reg := host.modelRegistration("alpha")
 	if reg.provider != "plugin-provider" {
 		t.Fatalf("registered provider = %q, want plugin-provider", reg.provider)
 	}
 	if len(reg.models) != 1 || reg.models[0].ID != "model-static" || reg.models[0].DisplayName != "Static Model" {
 		t.Fatalf("registered models = %#v, want static model", reg.models)
 	}
-	if _, okLegacy := modelRegistry.clients["plugin:alpha:legacy-provider"]; okLegacy {
+	if len(host.ModelsForProvider("legacy-provider")) != 0 {
 		t.Fatal("legacy ModelRegistrar path was used despite ModelProvider.StaticModels")
 	}
 }
@@ -287,9 +295,12 @@ func TestRegisterModelsSkipsErrorEmptyAndInvalidModels(t *testing.T) {
 	if len(modelRegistry.clients) != 0 {
 		t.Fatalf("registered clients = %#v, want none", modelRegistry.clients)
 	}
+	if registrations := host.snapshotModelRegistrations(); len(registrations) != 0 {
+		t.Fatalf("model registrations = %#v, want none", registrations)
+	}
 }
 
-func TestRegisterModelsPrunesStaleClientAfterSnapshotChange(t *testing.T) {
+func TestRegisterModelsPrunesStaleCatalogAfterSnapshotChange(t *testing.T) {
 	modelRegistry := newFakeModelRegistry()
 	host := newHostWithRecords(capabilityRecord{
 		id: "alpha",
@@ -297,7 +308,12 @@ func TestRegisterModelsPrunesStaleClientAfterSnapshotChange(t *testing.T) {
 			ModelRegistrar: staticModelRegistrar("provider-a", "model-a"),
 		}},
 	})
+	manager := newFakeExecutorManager()
 	host.RegisterModels(context.Background(), modelRegistry)
+	host.RegisterExecutors(manager, modelRegistry)
+	if models := host.ModelsForProvider("provider-a"); len(models) != 1 || models[0].ID != "model-a" {
+		t.Fatalf("initial provider catalog = %#v, want model-a", models)
+	}
 
 	setHostSnapshotForTest(host, true, capabilityRecord{
 		id: "bravo",
@@ -307,14 +323,15 @@ func TestRegisterModelsPrunesStaleClientAfterSnapshotChange(t *testing.T) {
 	})
 	host.RegisterModels(context.Background(), modelRegistry)
 
-	if _, okClient := modelRegistry.clients["plugin:alpha:provider-a"]; okClient {
-		t.Fatal("stale alpha client is still registered")
+	host.RegisterExecutors(manager, modelRegistry)
+	if len(host.ModelsForProvider("provider-a")) != 0 || len(host.modelRegistration("alpha").models) != 0 {
+		t.Fatal("stale alpha catalog is still retained")
 	}
-	if modelRegistry.unregisters[0] != "plugin:alpha:provider-a" {
-		t.Fatalf("unregistered clients = %#v, want alpha client first", modelRegistry.unregisters)
+	if models := host.ModelsForProvider("provider-b"); len(models) != 1 || models[0].ID != "model-b" {
+		t.Fatalf("provider catalog after reload = %#v, want model-b", models)
 	}
-	if _, okClient := modelRegistry.clients["plugin:bravo:provider-b"]; !okClient {
-		t.Fatal("bravo client was not registered")
+	if len(modelRegistry.clients) != 0 || len(modelRegistry.unregisters) != 0 {
+		t.Fatalf("catalog reload modified registry clients: clients=%#v, unregisters=%#v", modelRegistry.clients, modelRegistry.unregisters)
 	}
 }
 
@@ -1358,6 +1375,79 @@ func TestInterceptRequestAfterAuthPassesTargetFormat(t *testing.T) {
 
 	if string(got.Body) != "body|after" {
 		t.Fatalf("body = %q, want body|after", got.Body)
+	}
+}
+
+func TestInterceptRequestPropagatesPath_Issue6196(t *testing.T) {
+	host := newHostWithRecords(capabilityRecord{
+		id: "path-rewriter",
+		plugin: pluginapi.Plugin{Capabilities: pluginapi.Capabilities{
+			RequestInterceptor: requestInterceptorFunc(func(ctx context.Context, req pluginapi.RequestInterceptRequest) (pluginapi.RequestInterceptResponse, error) {
+				return pluginapi.RequestInterceptResponse{
+					Path: "/v1/images/generations",
+					Body: []byte(`{"model":"gpt-image-2.5"}`),
+				}, nil
+			}),
+		}},
+	})
+
+	got := host.InterceptRequestAfterAuth(context.Background(), pluginapi.RequestInterceptRequest{
+		SourceFormat: "openai-image",
+		Model:        "gpt-image-2.5",
+		Body:         []byte(`{"model":"gpt-image-2.5"}`),
+	})
+
+	if got.Path != "/v1/images/generations" {
+		t.Fatalf("got.Path = %q, want /v1/images/generations", got.Path)
+	}
+	if string(got.Body) != `{"model":"gpt-image-2.5"}` {
+		t.Fatalf("got.Body = %s, want expected body", string(got.Body))
+	}
+}
+
+func TestInterceptRequestPropagatesPathAcrossPluginChain_Issue6196(t *testing.T) {
+	var secondPluginSeenPath any
+	host := newHostWithRecords(
+		capabilityRecord{
+			id:       "first-path-rewriter",
+			priority: 20,
+			plugin: pluginapi.Plugin{Capabilities: pluginapi.Capabilities{
+				RequestInterceptor: requestInterceptorFunc(func(ctx context.Context, req pluginapi.RequestInterceptRequest) (pluginapi.RequestInterceptResponse, error) {
+					return pluginapi.RequestInterceptResponse{
+						Path: "/v1/images/generations",
+						Body: []byte(`{"model":"gpt-image-2.5","rewritten":true}`),
+					}, nil
+				}),
+			}},
+		},
+		capabilityRecord{
+			id:       "second-downstream-observer",
+			priority: 10,
+			plugin: pluginapi.Plugin{Capabilities: pluginapi.Capabilities{
+				RequestInterceptor: requestInterceptorFunc(func(ctx context.Context, req pluginapi.RequestInterceptRequest) (pluginapi.RequestInterceptResponse, error) {
+					if req.Metadata != nil {
+						secondPluginSeenPath = req.Metadata[coreexecutor.RequestPathMetadataKey]
+					}
+					return pluginapi.RequestInterceptResponse{}, nil
+				}),
+			}},
+		},
+	)
+
+	got := host.InterceptRequestAfterAuth(context.Background(), pluginapi.RequestInterceptRequest{
+		SourceFormat: "openai-image",
+		Model:        "gpt-image-2.5",
+		Body:         []byte(`{"model":"gpt-image-2.5"}`),
+		Metadata: map[string]any{
+			coreexecutor.RequestPathMetadataKey: "/v1/images/edits",
+		},
+	})
+
+	if got.Path != "/v1/images/generations" {
+		t.Fatalf("got.Path = %q, want /v1/images/generations", got.Path)
+	}
+	if secondPluginSeenPath != "/v1/images/generations" {
+		t.Fatalf("second plugin saw path = %v, want /v1/images/generations", secondPluginSeenPath)
 	}
 }
 
@@ -2931,6 +3021,37 @@ func TestAccessAdapterAuthenticateFailures(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestAccessAdapterAuthenticateMaxBytesErrorReturns413(t *testing.T) {
+	host := New()
+	called := false
+	adapter := newAccessAdapterForTest(host, "auth-plugin", frontendAuthProviderFunc{
+		identifier: "custom-auth",
+		authenticate: func(ctx context.Context, req pluginapi.FrontendAuthRequest) (pluginapi.FrontendAuthResponse, error) {
+			called = true
+			return pluginapi.FrontendAuthResponse{Authenticated: true}, nil
+		},
+	})
+	limitedBody := http.MaxBytesReader(nil, io.NopCloser(strings.NewReader("0123456789")), 4)
+	req, errNewRequest := http.NewRequest(http.MethodPost, "http://example.test/v1/chat", limitedBody)
+	if errNewRequest != nil {
+		t.Fatalf("NewRequest() error = %v", errNewRequest)
+	}
+
+	result, authErr := adapter.Authenticate(context.Background(), req)
+	if result != nil {
+		t.Fatalf("Authenticate() result = %#v, want nil", result)
+	}
+	if authErr == nil {
+		t.Fatal("Authenticate() error = nil, want 413 auth error")
+	}
+	if got := authErr.HTTPStatusCode(); got != http.StatusRequestEntityTooLarge {
+		t.Fatalf("Authenticate() status = %d, want %d (err=%v)", got, http.StatusRequestEntityTooLarge, authErr)
+	}
+	if called {
+		t.Fatal("provider Authenticate() was called despite oversized request body")
 	}
 }
 

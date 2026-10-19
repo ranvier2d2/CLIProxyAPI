@@ -8,6 +8,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
 	log "github.com/sirupsen/logrus"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 type pluginProviderApplier struct {
@@ -405,11 +406,23 @@ func applyThinking(body, sourceBody []byte, model string, fromFormat string, toF
 	if thinkingIsFullyDisabled(*validated) || nativeResponses {
 		return applied, nil
 	}
+	if providerFormat == "claude" && thinkingRequestedOff(config) {
+		// The model cannot turn thinking off, so ValidateConfig fell back to its
+		// lowest level. Drop any stale block_binding from the off request and keep
+		// the caller's intent of seeing no thinking: without an explicit omitted
+		// display, cloaking would add progress updates.
+		applied, _ = sjson.DeleteBytes(applied, "thinking.block_binding")
+		summaryConfig = SummaryConfig{Mode: SummaryDisabled}
+	}
 	return applySummaryConfigForProvider(applied, providerFormat, baseModel, providerKey, modelInfo, summaryConfig), nil
 }
 
 func thinkingIsFullyDisabled(config ThinkingConfig) bool {
 	return config.Mode == ModeNone && config.Budget == 0 && config.Level == ""
+}
+
+func thinkingRequestedOff(config ThinkingConfig) bool {
+	return config.Mode == ModeNone || (config.Mode == ModeBudget && config.Budget == 0)
 }
 
 func shouldMapConfiguredHighIntent(fromFormat, toFormat string, modelInfo *registry.ModelInfo) bool {
@@ -668,6 +681,12 @@ func extractThinkingConfigForUsage(body []byte, provider string) ThinkingConfig 
 	switch strings.ToLower(strings.TrimSpace(provider)) {
 	case "codex", "xai", "openai-response":
 		return extractCodexUsageConfig(body)
+	case "claude":
+		// between_tools is how claude-sonnet-5-5 turns thinking off.
+		if gjson.GetBytes(body, "thinking.type").String() == "between_tools" {
+			return ThinkingConfig{Mode: ModeNone, Budget: 0}
+		}
+		return extractThinkingConfig(body, provider)
 	default:
 		return extractThinkingConfig(body, provider)
 	}
@@ -705,12 +724,14 @@ func reasoningEffortFromConfig(config ThinkingConfig) string {
 // extractClaudeConfig extracts thinking configuration from Claude format request body.
 //
 // Claude API format:
-//   - thinking.type: "enabled" or "disabled"
+//   - thinking.type: "enabled", "adaptive", "auto", or "disabled"
 //   - thinking.budget_tokens: integer (-1=auto, 0=disabled, >0=budget)
+//   - output_config.effort: string ("none", "auto", "low", "medium", "high", "max")
 //
 // Priority: thinking.type="disabled" takes precedence over budget_tokens.
-// When type="enabled" without budget_tokens, returns ModeAuto to indicate
-// the user wants thinking enabled but didn't specify a budget.
+// When type="enabled", budget_tokens takes precedence over output_config.effort.
+// When type="enabled" without budget_tokens, output_config.effort is preserved if present;
+// otherwise returns ModeAuto to indicate the user wants thinking enabled with default budget.
 func extractClaudeConfig(body []byte) ThinkingConfig {
 	thinkingType := gjson.GetBytes(body, "thinking.type").String()
 	if thinkingType == "disabled" {
@@ -750,8 +771,21 @@ func extractClaudeConfig(body []byte) ThinkingConfig {
 		}
 	}
 
-	// If type="enabled" but no budget_tokens, treat as auto (user wants thinking but no budget specified)
+	// If type="enabled", check output_config.effort before falling back to auto
 	if thinkingType == "enabled" {
+		if effort := gjson.GetBytes(body, "output_config.effort"); effort.Exists() && effort.Type == gjson.String {
+			value := strings.ToLower(strings.TrimSpace(effort.String()))
+			if value != "" {
+				switch value {
+				case "none":
+					return ThinkingConfig{Mode: ModeNone, Budget: 0}
+				case "auto":
+					return ThinkingConfig{Mode: ModeAuto, Budget: -1}
+				default:
+					return ThinkingConfig{Mode: ModeLevel, Level: ThinkingLevel(value)}
+				}
+			}
+		}
 		return ThinkingConfig{Mode: ModeAuto, Budget: -1}
 	}
 

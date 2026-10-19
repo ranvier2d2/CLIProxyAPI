@@ -62,6 +62,8 @@ type ConfigField struct {
 	Name string
 	// Type classifies the field value for management clients.
 	Type ConfigFieldType
+	// Default is the value used when the configuration key is omitted.
+	Default any
 	// EnumValues lists allowed values when Type is ConfigFieldTypeEnum.
 	EnumValues []string
 	// Description explains how the plugin uses the field.
@@ -194,6 +196,9 @@ type ThinkingSupport struct {
 	ZeroAllowed bool
 	// DynamicAllowed reports whether automatic reasoning budget selection is supported.
 	DynamicAllowed bool
+	// DisableType is the Claude thinking.type that turns thinking off for this
+	// model. Empty means "disabled"; claude-sonnet-5-5 needs "between_tools".
+	DisableType string
 	// Levels lists supported named reasoning levels.
 	Levels []string
 }
@@ -372,6 +377,8 @@ type AuthRefreshResponse struct {
 }
 
 // ModelRegistrar registers plugin-provided models with the host.
+// Without an Executor, these models are published only through matching credentials
+// after applying their model exclusions.
 type ModelRegistrar interface {
 	RegisterModels(context.Context, ModelRegistrationRequest) (ModelRegistrationResponse, error)
 }
@@ -391,6 +398,7 @@ type ModelRegistrationResponse struct {
 }
 
 // ModelProvider contributes provider-native static and per-auth model metadata.
+// StaticModels alone does not make models available without an Executor or matching credentials.
 type ModelProvider interface {
 	StaticModels(context.Context, StaticModelRequest) (ModelResponse, error)
 	ModelsForAuth(context.Context, AuthModelRequest) (ModelResponse, error)
@@ -693,6 +701,8 @@ type HostModelExecutionRequest struct {
 	// ProxyURL optionally overrides the outbound proxy for this model execution only.
 	// Supported schemes are http, https, socks5, and socks5h.
 	ProxyURL string `json:"proxy_url,omitempty"`
+	// Path optionally specifies or overrides the request path (e.g. "/v1/images/generations" or "/v1/images/edits").
+	Path string `json:"path,omitempty"`
 }
 
 // HostModelExecutionResponse describes a non-streaming host model execution response.
@@ -880,6 +890,20 @@ type HostAffinityLookupResponse struct {
 	Disabled bool `json:"disabled,omitempty"`
 	// Unavailable reports whether the bound credential is currently unavailable.
 	Unavailable bool `json:"unavailable,omitempty"`
+}
+
+// HostRoutingResetCooldownRequest asks the host to clear quota and cooldown routing state for one credential.
+type HostRoutingResetCooldownRequest struct {
+	// AuthIndex identifies the credential index.
+	AuthIndex string `json:"auth_index"`
+}
+
+// HostRoutingResetCooldownResponse reports the credential whose quota and cooldown state was cleared.
+type HostRoutingResetCooldownResponse struct {
+	// AuthIndex identifies the credential index.
+	AuthIndex string `json:"auth_index"`
+	// Models lists the model keys whose routing state was reset.
+	Models []string `json:"models,omitempty"`
 }
 
 // HTTPWireProfile configures transport-level wire representation for plugin HTTP requests.
@@ -1137,6 +1161,8 @@ type RequestInterceptRequest struct {
 
 // RequestInterceptResponse returns request modifications.
 type RequestInterceptResponse struct {
+	// Path optionally overrides the target request path (e.g. "/v1/images/generations").
+	Path string `json:"path,omitempty"`
 	// Headers replaces matching current request headers and preserves headers not mentioned here.
 	Headers http.Header
 	// Body replaces the current request body only when non-empty.
@@ -1482,6 +1508,10 @@ type UsageRecord struct {
 	Alias string
 	// APIKey is the client API key identifier when available.
 	APIKey string
+	// IsNativeKey reports whether the client API key was authenticated by CPA's native config provider.
+	IsNativeKey bool
+	// AccessProvider identifies the client request authentication provider (e.g. "config-inline" or plugin ID).
+	AccessProvider string
 	// SessionID identifies the session when present.
 	SessionID string
 	// ParentSessionID identifies the parent session in a hierarchy or fork.

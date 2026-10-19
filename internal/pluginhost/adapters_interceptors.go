@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
+	coreexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginabi"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
 	log "github.com/sirupsen/logrus"
@@ -127,6 +128,12 @@ func (h *Host) interceptRequest(ctx context.Context, req pluginapi.RequestInterc
 			nextReq.Body = nil
 		}
 		nextReq.Metadata = cloneInterceptorMetadata(req.Metadata)
+		if current.Path != "" {
+			if nextReq.Metadata == nil {
+				nextReq.Metadata = make(map[string]any, 1)
+			}
+			nextReq.Metadata[coreexecutor.RequestPathMetadataKey] = current.Path
+		}
 		if resp, ok := h.callRequestInterceptor(ctx, record, method, func(callCtx context.Context, callReq pluginapi.RequestInterceptRequest) (pluginapi.RequestInterceptResponse, error) {
 			return invoke(interceptor, callCtx, callReq)
 		}, nextReq); ok {
@@ -134,6 +141,9 @@ func (h *Host) interceptRequest(ctx context.Context, req pluginapi.RequestInterc
 			if len(resp.Body) > 0 {
 				currentBase = bytes.Clone(resp.Body)
 				bodyModified = true
+			}
+			if strings.TrimSpace(resp.Path) != "" {
+				current.Path = strings.TrimSpace(resp.Path)
 			}
 			if resp.Terminate {
 				current.Terminate = true
@@ -382,42 +392,20 @@ func (h *Host) HasRequestInterceptors() bool {
 	return false
 }
 
-func (h *Host) commitModelClients(snap *Snapshot, modelRegistry modelRegistry, registrations []modelClientRegistration, nextClients map[string]struct{}, nextProviders map[string]string, nextModelRegistrations map[string]pluginModelRegistration) {
-	if h == nil || modelRegistry == nil {
-		return
-	}
-
-	staleClients := make([]string, 0)
-	h.mu.Lock()
-	if h.Snapshot() != snap {
-		h.mu.Unlock()
-		return
-	}
-	for clientID := range h.modelClientIDs {
-		if _, okClient := nextClients[clientID]; !okClient {
-			staleClients = append(staleClients, clientID)
-		}
-	}
-	h.modelClientIDs = nextClients
-	h.modelProviders = nextProviders
-	h.modelRegistrations = nextModelRegistrations
-	h.mu.Unlock()
-
-	for _, registration := range registrations {
-		modelRegistry.RegisterClient(registration.clientID, registration.provider, registration.models)
-	}
-	for _, clientID := range staleClients {
-		modelRegistry.UnregisterClient(clientID)
-	}
-}
-
 func readAndRestoreRequestBody(r *http.Request) ([]byte, error) {
 	if r == nil || r.Body == nil {
 		return nil, nil
 	}
-	body, errReadAll := io.ReadAll(r.Body)
+	origBody := r.Body
+	body, errReadAll := io.ReadAll(origBody)
 	if errReadAll != nil {
-		r.Body = io.NopCloser(bytes.NewReader(body))
+		r.Body = struct {
+			io.Reader
+			io.Closer
+		}{
+			Reader: io.MultiReader(bytes.NewReader(body), origBody),
+			Closer: origBody,
+		}
 		return nil, errReadAll
 	}
 	r.Body = io.NopCloser(bytes.NewReader(body))

@@ -123,6 +123,8 @@ type RequestAfterAuthInterceptRequest struct {
 
 // RequestAfterAuthInterceptResponse returns selected-auth request modifications.
 type RequestAfterAuthInterceptResponse struct {
+	// Path optionally overrides the inbound request path in Options.Metadata[RequestPathMetadataKey].
+	Path string
 	// Headers replaces matching current request headers and preserves headers not mentioned here.
 	Headers http.Header
 	// Body replaces the current request body only when non-empty.
@@ -221,6 +223,9 @@ type Options struct {
 	// ProxyURL overrides the credential and global proxy for this execution only.
 	// Credential refresh and token exchange must ignore it.
 	ProxyURL string
+	// KeepTopLevelEffort tells SIWC request-body rules to keep the resolved
+	// top-level reasoning.effort when configuration_update items are collapsed.
+	KeepTopLevelEffort bool
 }
 
 // EnsureMetadata initializes and returns Metadata, ensuring it is non-nil.

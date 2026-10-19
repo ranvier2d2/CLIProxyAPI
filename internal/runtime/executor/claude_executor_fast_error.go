@@ -2,6 +2,7 @@ package executor
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -133,7 +134,7 @@ func wrapClaudeFastRequestError(fastRequest bool, status int, err error) error {
 	return &claudeFastRequestError{cause: err, status: status, retryAfter: retryAfter}
 }
 
-func newClaudeFastDirectResponseError(resp *http.Response, body []byte) error {
+func newClaudeFastDirectResponseError(ctx context.Context, auth *cliproxyauth.Auth, resp *http.Response, body []byte) error {
 	if resp == nil {
 		return nil
 	}
@@ -146,7 +147,9 @@ func newClaudeFastDirectResponseError(resp *http.Response, body []byte) error {
 	var retryAfter *time.Duration
 	credentialScoped := false
 	if resp.StatusCode == http.StatusTooManyRequests {
-		retryAfter = helps.ParseClaudeRateLimitReset(resp.Header, time.Now())
+		entry := helps.ClaudeRateLimitLogger(ctx, auth)
+		helps.LogClaudeRateLimitResponseHeaders(entry, resp.Header)
+		retryAfter = helps.ParseClaudeRateLimitResetForErrorWithLogger(resp.Header, body, time.Now(), entry)
 		if helps.ClaudeHeadersIndicateUnifiedRateLimitRejection(resp.Header) {
 			credentialScoped = true
 		}
