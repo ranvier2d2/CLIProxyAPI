@@ -126,6 +126,17 @@ type ClaudeConfig struct {
 	// switches. A nil value (unset) defaults to 7 days; an explicit 0 keeps
 	// the continuity-scoped pin (1h lifetime).
 	SessionDatePinDays *int `yaml:"session-date-pin-days" json:"session-date-pin-days"`
+	// PixirDisableServerFallback keeps the cloak from adding Anthropic's
+	// server-side model fallback to Pixir Sessions: cloaked requests that name
+	// their Session with X-Session-ID. A fallback the caller sent is kept. A nil
+	// value (unset) means true; an explicit false restores the injection.
+	PixirDisableServerFallback *bool `yaml:"pixir-disable-server-fallback,omitempty" json:"pixir-disable-server-fallback,omitempty"`
+}
+
+// PixirServerFallbackDisabled reports whether the cloak must not add a
+// server-side model fallback to a Pixir Session. Unset defaults to true.
+func (c ClaudeConfig) PixirServerFallbackDisabled() bool {
+	return c.PixirDisableServerFallback == nil || *c.PixirDisableServerFallback
 }
 
 // DefaultClaudeSessionDatePinDays is the session date pin retention applied

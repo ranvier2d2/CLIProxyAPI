@@ -430,6 +430,14 @@ upstream:
     # prompt cache. Default 7; an explicit 0 keeps the continuity-scoped pin (1h lifetime).
     session-date-pin-days: 7
 
+    # When true (the default), cloaked requests that name their Session with X-Session-ID, as
+    # Pixir does, get no server-side model fallback ("fallbacks", fallback_credit_token) added by
+    # the cloak, and so no server-side-fallback / fallback-credit betas. Such a caller replays
+    # signed thinking under the model it asked for, and a mid-response fallback to another model
+    # makes its next request fail. A fallback the caller sends itself is kept, and real Claude
+    # Code and cloaked callers without X-Session-ID are unaffected. Set false to inject as before.
+    pixir-disable-server-fallback: true
+
     # When true, disable Claude request cloaking on OAuth and API-key CLI profiles (the Claude Code CLI disguise and
     # system prompt replacement), so the original system prompt is passed through to Claude as-is.
     # Credential attributes and explicit per-key cloak modes override this shared default.

@@ -182,3 +182,50 @@ func TestParseConfigBytesClaudeToolSearch(t *testing.T) {
 		})
 	}
 }
+
+func TestParseConfigBytesClaudePixirDisableServerFallback(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+		want bool
+	}{
+		{name: "defaults to disabled fallback", yaml: "port: 8317\n", want: true},
+		{name: "v8 explicit false", yaml: "config-version: 8\nupstream:\n  claude:\n    pixir-disable-server-fallback: false\n", want: false},
+		{name: "legacy explicit false", yaml: "claude:\n  pixir-disable-server-fallback: false\n", want: false},
+		{name: "v8 explicit true", yaml: "config-version: 8\nupstream:\n  claude:\n    pixir-disable-server-fallback: true\n", want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, errParse := ParseConfigBytes([]byte(tt.yaml))
+			if errParse != nil {
+				t.Fatalf("ParseConfigBytes() error = %v", errParse)
+			}
+			if got := cfg.Claude.PixirServerFallbackDisabled(); got != tt.want {
+				t.Fatalf("PixirServerFallbackDisabled() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSaveConfigPreserveComments_PixirDisableServerFallbackExplicitFalse(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if errWrite := os.WriteFile(configPath, []byte("port: 8317\n"), 0o600); errWrite != nil {
+		t.Fatalf("os.WriteFile() error = %v", errWrite)
+	}
+
+	off := false
+	cfg := &Config{Claude: ClaudeConfig{PixirDisableServerFallback: &off}}
+	if errSave := SaveConfigPreserveComments(configPath, cfg); errSave != nil {
+		t.Fatalf("SaveConfigPreserveComments() error = %v", errSave)
+	}
+
+	loaded, errLoad := LoadConfigOptional(configPath, false)
+	if errLoad != nil {
+		t.Fatalf("LoadConfigOptional() error = %v", errLoad)
+	}
+	if loaded.Claude.PixirServerFallbackDisabled() {
+		savedBytes, _ := os.ReadFile(configPath)
+		t.Fatalf("explicit pixir-disable-server-fallback: false did not survive a save:\n%s", savedBytes)
+	}
+}

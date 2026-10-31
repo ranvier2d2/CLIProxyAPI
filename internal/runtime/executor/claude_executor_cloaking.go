@@ -1386,6 +1386,11 @@ func claudeSessionDatePinRetention(cfg *config.Config) time.Duration {
 	return cfg.Claude.SessionDatePinRetention()
 }
 
+// claudePixirServerFallbackDisabled defaults to true, also without a config.
+func claudePixirServerFallbackDisabled(cfg *config.Config) bool {
+	return cfg == nil || cfg.Claude.PixirServerFallbackDisabled()
+}
+
 // claudeCallerCurrentDateReminderDate returns the date of the first valid
 // caller-supplied currentDate reminder in the first user message.
 func claudeCallerCurrentDateReminderDate(payload []byte) string {
@@ -1822,11 +1827,15 @@ func applyCloakingInternal(
 
 	// In native Claude Code 2.1.258, claude-fable-5-1 requests carry:
 	// "fallbacks": [{"model": "claude-opus-5"}]
+	// A Pixir Session (a cloaked caller naming its Session) replays signed
+	// thinking under the model it asked for, so a mid-response fallback to
+	// another model breaks its next request; it gets no fallback it did not send.
+	injectFallback := !isProbeOrHelper && !(sessionID != "" && claudePixirServerFallbackDisabled(cfg))
 	model := strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, "model").String()))
-	if isClaudeOpus55Model(model) && !isProbeOrHelper && !gjson.GetBytes(payload, "fallbacks").Exists() {
+	if isClaudeOpus55Model(model) && injectFallback && !gjson.GetBytes(payload, "fallbacks").Exists() {
 		payload, _ = sjson.SetRawBytes(payload, "fallbacks", []byte(`[{"model":"claude-opus-4-8"}]`))
 	}
-	if isClaudeFable51Model(model) && !isProbeOrHelper {
+	if isClaudeFable51Model(model) && injectFallback {
 		if !gjson.GetBytes(payload, "fallbacks").Exists() {
 			payload, _ = sjson.SetRawBytes(payload, "fallbacks", []byte(`[{"model":"claude-opus-5"}]`))
 		}
