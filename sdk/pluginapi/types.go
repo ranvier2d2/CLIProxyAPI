@@ -477,6 +477,8 @@ const (
 	SchedulerBuiltinRoundRobin = "round-robin"
 	// SchedulerBuiltinFillFirst delegates auth selection to the built-in fill-first scheduler.
 	SchedulerBuiltinFillFirst = "fill-first"
+	// SchedulerBuiltinSoonestResetFirst delegates auth selection to the soonest long-window reset.
+	SchedulerBuiltinSoonestResetFirst = "soonest-reset-first"
 )
 
 // Scheduler chooses an auth candidate before the built-in scheduler runs.
