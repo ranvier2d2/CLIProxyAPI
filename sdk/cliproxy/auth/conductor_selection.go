@@ -666,7 +666,9 @@ func selectionArgForSelector(selector Selector, routeModel string) string {
 func selectorContextForAvailableAuths(ctx context.Context, selector Selector, routeModel string) context.Context {
 	ctx = withWeightedSelectorStateModel(ctx, selector, routeModel)
 	if !isBuiltInSelector(selector) {
-		if _, sessionAffinity := selector.(*SessionAffinitySelector); !sessionAffinity {
+		_, sessionAffinity := selector.(*SessionAffinitySelector)
+		_, soonestReset := selector.(*SoonestResetFirstSelector)
+		if !sessionAffinity && !soonestReset {
 			return ctx
 		}
 	}
@@ -1012,6 +1014,13 @@ func (m *Manager) pickViaPluginScheduler(ctx context.Context, scheduler PluginSc
 	}
 	if selected := pickSchedulerAuthByID(candidates, resp.AuthID); selected != nil {
 		return selected, true, nil
+	}
+
+	if strings.TrimSpace(resp.DelegateBuiltin) == pluginapi.SchedulerBuiltinSoonestResetFirst {
+		selector := &m.builtinSoonestResetSelector
+		selectorCtx := selectorContextForAvailableAuths(ctx, selector, model)
+		selected, errSelect := selector.Pick(selectorCtx, providerKey, model, opts, candidates)
+		return selected, true, errSelect
 	}
 
 	strategy, okStrategy := builtinSchedulerStrategy(resp.DelegateBuiltin)
