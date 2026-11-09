@@ -312,7 +312,7 @@ Report what actually happened, not what you intended. When you say something is 
 
 func checkSystemInstructionsWithMode(payload []byte, strictMode bool, keepCallerSystemTopLevel ...bool) []byte {
 	keepAtTopLevel := len(keepCallerSystemTopLevel) > 0 && keepCallerSystemTopLevel[0]
-	return checkSystemInstructionsWithSigningMode(payload, strictMode, false, "2.1.280", "cli", "", keepAtTopLevel)
+	return checkSystemInstructionsWithSigningMode(payload, strictMode, false, "2.1.321", "cli", "", keepAtTopLevel)
 }
 
 // checkSystemInstructionsWithSigningMode keeps the top-level system in Claude
@@ -323,6 +323,21 @@ func checkSystemInstructionsWithMode(payload []byte, strictMode bool, keepCaller
 func checkSystemInstructionsWithSigningMode(payload []byte, strictMode bool, cchSigning bool, version, entrypoint, workload string, keepCallerSystemTopLevel ...bool) []byte {
 	keepAtTopLevel := len(keepCallerSystemTopLevel) > 0 && keepCallerSystemTopLevel[0]
 	return checkSystemInstructionsWithSigningModeAt(payload, strictMode, cchSigning, version, entrypoint, workload, claudeCodeLocalDate(time.Now()), false, "", "", keepAtTopLevel, "")
+}
+
+// isClaudeFable52Model reports whether the model is Fable 5.2, which Anthropic
+// serves only to Claude Code 2.1.290 or newer.
+func isClaudeFable52Model(model string) bool {
+	m := claudeCanonicalModel(model)
+	for _, target := range []string{"fable-5-2", "fable-5.2"} {
+		if idx := strings.Index(m, target); idx != -1 {
+			next := idx + len(target)
+			if next >= len(m) || m[next] < '0' || m[next] > '9' {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // isClaudeFable51Model reports whether the model is specifically Fable 5.1 / Mythos 5.1,
