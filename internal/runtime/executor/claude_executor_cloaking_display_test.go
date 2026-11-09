@@ -40,7 +40,7 @@ func TestReconcileClaudeCloakDisplayAfterThinkingOverride(t *testing.T) {
 }
 
 func TestReconcileClaudeCloakDisplayRemovesSyntheticDisplayForNonProgressModel(t *testing.T) {
-	body := []byte(`{"model":"claude-opus-4-8","thinking":{"type":"adaptive","display":"updates"}}`)
+	body := []byte(`{"model":"claude-opus-4-6","thinking":{"type":"adaptive","display":"updates"}}`)
 	out := reconcileClaudeCodeFableModelAfterPayload(body, claudeCodeFableState{injectedDisplay: true}, false, false, true, false)
 	if display := gjson.GetBytes(out, "thinking.display"); display.Exists() {
 		t.Fatalf("synthetic display survived for non-progress model: %s", out)

@@ -816,7 +816,7 @@ func TestClaudeExecutor_NonClaudeRequestUsesClaudeCode220CLIFingerprint(t *testi
 		t.Fatalf("Execute() error = %v", errExecute)
 	}
 
-	assertClaudeFingerprint(t, seenHeaders, "claude-cli/2.1.321 (external, cli)", "0.112.1", "v26.3.0", "MacOS", "arm64")
+	assertClaudeFingerprint(t, seenHeaders, "claude-cli/2.1.321 (external, cli)", "0.128.0", "v26.12.1", "MacOS", "arm64")
 	if got := seenHeaders.Get("X-App"); got != "cli" {
 		t.Fatalf("X-App = %q, want cli", got)
 	}
@@ -828,8 +828,8 @@ func TestClaudeExecutor_NonClaudeRequestUsesClaudeCode220CLIFingerprint(t *testi
 	if len(system) != 2 {
 		t.Fatalf("system block count = %d, want 2: %s", len(system), seenBody)
 	}
-	if got := system[0].Get("text").String(); got != "x-anthropic-billing-header: cc_version=2.1.280.d7b; cc_entrypoint=cli;" {
-		t.Fatalf("billing header = %q, want 2.1.280 CLI fingerprint", got)
+	if got := system[0].Get("text").String(); got != "x-anthropic-billing-header: cc_version=2.1.321.cf7; cc_entrypoint=cli;" {
+		t.Fatalf("billing header = %q, want 2.1.321 CLI fingerprint", got)
 	}
 	if got := system[1].Get("text").String(); got != claudeCodeCLIIdentity {
 		t.Fatalf("system[1].text = %q, want official CLI identity", got)
@@ -881,8 +881,8 @@ func TestClaudeExecutor_ConfirmedNewerPatchClaudeCodeRequestPreservesInteractive
 		"X-App":                       {"cli"},
 		"Anthropic-Beta":              {"claude-code-20250219,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,effort-2025-11-24"},
 		"X-Claude-Code-Session-Id":    {sessionID},
-		"X-Stainless-Package-Version": {"0.112.1"},
-		"X-Stainless-Runtime-Version": {"v26.3.0"},
+		"X-Stainless-Package-Version": {"0.128.0"},
+		"X-Stainless-Runtime-Version": {"v26.12.1"},
 		"X-Stainless-Os":              {"MacOS"},
 		"X-Stainless-Arch":            {"arm64"},
 	}
@@ -904,7 +904,7 @@ func TestClaudeExecutor_ConfirmedNewerPatchClaudeCodeRequestPreservesInteractive
 		t.Fatalf("Execute() error = %v", errExecute)
 	}
 
-	assertClaudeFingerprint(t, seenHeaders, "claude-cli/2.1.322 (external, cli)", "0.112.1", "v26.3.0", "MacOS", "arm64")
+	assertClaudeFingerprint(t, seenHeaders, "claude-cli/2.1.322 (external, cli)", "0.128.0", "v26.12.1", "MacOS", "arm64")
 	if got := gjson.GetBytes(seenBody, "system.0.text").String(); got != "interactive-system" {
 		t.Fatalf("system.0.text = %q, want confirmed client system preserved", got)
 	}
@@ -1002,7 +1002,7 @@ func TestClaudeExecutor_ConfirmedCLIForwardsNativeOpus55Shape(t *testing.T) {
 	defer server.Close()
 
 	const userID = `{"device_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","account_uuid":"11111111-2222-4333-8444-555555555555","session_id":"11111111-2222-4333-8444-555555555555"}`
-	const billing = "x-anthropic-billing-header: cc_version=2.1.280.d7b; cc_entrypoint=cli; cch=00000; cc_turn_origin=human;"
+	const billing = "x-anthropic-billing-header: cc_version=2.1.321.cf7; cc_entrypoint=cli; cch=00000; cc_turn_origin=human;"
 	const betas = "claude-code-20250219,oauth-2025-04-20,mid-conversation-system-clear-at-2026-08-21,thinking-binding-controls-2026-08-01,extended-cache-ttl-2025-04-11"
 	payload := []byte(`{"model":"claude-opus-5-5","system":[{"type":"text","text":` + fmt.Sprintf("%q", billing) + `},{"type":"text","text":"native identity"},{"type":"text","text":"native model block"}],"messages":[{"role":"user","content":"hello"}],"metadata":{"user_id":` + fmt.Sprintf("%q", userID) + `},"fallbacks":[{"model":"claude-opus-4-8"}],"thinking":{"type":"adaptive","display":"updates"}}`)
 	incoming := http.Header{
@@ -1071,8 +1071,8 @@ func TestClaudeExecutor_ConfirmedVSCodeAgentSDKRequestPreservesIdentity(t *testi
 		"Anthropic-Beta": {"claude-code-20250219,interleaved-thinking-2025-05-14"},
 		"Anthropic-Dangerous-Direct-Browser-Access": {"true"},
 		"X-Claude-Code-Session-Id":                  {sessionID},
-		"X-Stainless-Package-Version":               {"0.112.1"},
-		"X-Stainless-Runtime-Version":               {"v26.3.0"},
+		"X-Stainless-Package-Version":               {"0.128.0"},
+		"X-Stainless-Runtime-Version":               {"v26.12.1"},
 		"X-Stainless-Os":                            {"MacOS"},
 		"X-Stainless-Arch":                          {"arm64"},
 	}
@@ -1095,7 +1095,7 @@ func TestClaudeExecutor_ConfirmedVSCodeAgentSDKRequestPreservesIdentity(t *testi
 		t.Fatalf("Execute() error = %v", errExecute)
 	}
 
-	assertClaudeFingerprint(t, seenHeaders, vscodeUA, "0.112.1", "v26.3.0", "MacOS", "arm64")
+	assertClaudeFingerprint(t, seenHeaders, vscodeUA, "0.128.0", "v26.12.1", "MacOS", "arm64")
 	if got := seenHeaders.Get("Anthropic-Dangerous-Direct-Browser-Access"); got != "true" {
 		t.Fatalf("Anthropic-Dangerous-Direct-Browser-Access = %q, want preserved true", got)
 	}
@@ -1259,8 +1259,8 @@ func TestClaudeExecutor_ConfirmedVSCodeOAuthPreservesToolNames(t *testing.T) {
 			"User-Agent":                  {"claude-cli/2.1.321 (external, claude-vscode, agent-sdk/0.3.220)"},
 			"X-App":                       {"cli"},
 			"Anthropic-Beta":              {"claude-code-20250219"},
-			"X-Stainless-Package-Version": {"0.112.1"},
-			"X-Stainless-Runtime-Version": {"v26.3.0"},
+			"X-Stainless-Package-Version": {"0.128.0"},
+			"X-Stainless-Runtime-Version": {"v26.12.1"},
 		},
 	})
 	if errExecute != nil {
@@ -5633,7 +5633,6 @@ func TestClaudeExecutor_CloakedOpus55PairsFallbackAndBetas(t *testing.T) {
 	}
 	for _, beta := range []string{
 		claudePerTurnControlBeta,
-		claudeMidConvSystemClearAtBeta,
 		claudeThinkingBindingBeta,
 		claudeServerSideFallbackBeta,
 		claudeFallbackCreditBeta,
@@ -5641,6 +5640,10 @@ func TestClaudeExecutor_CloakedOpus55PairsFallbackAndBetas(t *testing.T) {
 		if !strings.Contains(seenHeaders.Get("Anthropic-Beta"), beta) {
 			t.Errorf("missing %s beta", beta)
 		}
+	}
+	// 2.1.321 sends clear-at only for bodies that carry clear_at.
+	if strings.Contains(seenHeaders.Get("Anthropic-Beta"), claudeMidConvSystemClearAtBeta) {
+		t.Errorf("unexpected %s beta without clear_at", claudeMidConvSystemClearAtBeta)
 	}
 	if text := gjson.GetBytes(seenBody, "system.0.text").String(); !strings.Contains(text, "cc_turn_origin=human;") {
 		t.Error("cloaked request is missing human turn origin")

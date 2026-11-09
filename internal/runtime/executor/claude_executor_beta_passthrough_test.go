@@ -39,8 +39,8 @@ func TestApplyClaudeHeaders_ForwardsUnmanagedCallerBetas(t *testing.T) {
 	if !strings.Contains(betas, "message-threads-2026-08-12") {
 		t.Fatalf("Anthropic-Beta = %q, want unmanaged caller beta forwarded", betas)
 	}
-	if !strings.Contains(betas, "mid-conversation-system-2026-04-07,per-turn-control-2026-07-01,mid-conversation-tool-changes-2026-07-01,mid-conversation-system-clear-at-2026-08-21,effort-2025-11-24") {
-		t.Fatalf("Anthropic-Beta = %q, want fable-5-1 per-turn-control between mid-conversation-system and tool-changes", betas)
+	if !strings.Contains(betas, "prompt-caching-scope-2026-01-05,per-turn-control-2026-07-01,mid-conversation-tool-changes-2026-07-01,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,effort-2025-11-24") {
+		t.Fatalf("Anthropic-Beta = %q, want fable-5-1 per-turn-control between prompt-caching-scope and tool-changes", betas)
 	}
 }
 
@@ -137,7 +137,7 @@ func TestApplyClaudeHeaders_ForwardsUnmanagedCallerBetas_OAuth(t *testing.T) {
 	if !strings.Contains(betas, "message-threads-2026-08-12") {
 		t.Fatalf("Anthropic-Beta = %q, want unmanaged caller beta forwarded on OAuth", betas)
 	}
-	if !strings.Contains(betas, "mid-conversation-system-2026-04-07,per-turn-control-2026-07-01,mid-conversation-tool-changes-2026-07-01") {
+	if !strings.Contains(betas, "prompt-caching-scope-2026-01-05,per-turn-control-2026-07-01,mid-conversation-tool-changes-2026-07-01") {
 		t.Fatalf("Anthropic-Beta = %q, want fable-5-1 per-turn-control assembled", betas)
 	}
 }
