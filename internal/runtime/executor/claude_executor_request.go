@@ -148,50 +148,58 @@ func isManagedClaudeBeta(beta string) bool {
 // with first-party base-URL behavior forced through
 // _CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL. The relative order of the rarer
 // betas comes from the binary's beta rule tables. Against 2.1.280 it:
+//
 //   - no longer sends mid-conversation-system-2026-04-07: the role=system turn
 //     is generally available, and the binary refuses to send the header even
 //     when ANTHROPIC_BETAS names it;
+//
 //   - moves thinking-token-count after the model capability betas;
+//
 //   - adds tool-provenance-2026-10-26 to every first-party main request;
+//
 //   - sends per-turn-control for every model whose catalog lists
 //     per_turn_effort, now including fable-5-2, sonnet-5-5 and haiku-5-5;
+//
 //   - puts claude-code-20250219 after prompt-caching-scope on Haiku models;
+//
 //   - sends thinking-binding-controls with adaptive thinking on every model;
+//
 //   - sends mid-conversation-system-clear-at only for clear_at bodies;
+//
 //   - derives fallbacks from server configuration rather than a fixed model
 //     list, using server-side-fallback-2026-07-01 for fallbacks:"default".
 //
-//	 1 claude-code-20250219              non-Haiku models
-//	 2 oauth-2025-04-20                  OAuth credentials only
-//	 3 context-1m-2025-08-07             [1m] model variants only
-//	 4 interleaved-thinking-2025-05-14
-//	 5 redact-thinking-2026-02-12        cli entrypoint, no thinking.display
-//	 6 context-management-2025-06-27
-//	 7 structured-outputs-2025-12-15     requested only (flag tengu_tool_pear defaults off)
-//	 8 prompt-caching-scope-2026-01-05
-//	 9 claude-code-20250219              Haiku models
-//	10 per-turn-control-2026-07-01       per_turn_effort models, or requested
-//	11 timing-2026-09-09                 per-turn timing body, or requested
-//	12 mid-conversation-tool-changes-2026-07-01  role=system models except sonnet-5
-//	13 inline-tools-2026-09-15           inline tool_addition blocks, or requested
-//	14 tool-provenance-2026-10-26        every request except probes and helpers
-//	15 advisor-tool-2026-03-01           advisor tools or requested
-//	16 thinking-token-count-2026-05-13
-//	17 advanced-tool-use-2025-11-20      tool search or another advanced tool-use feature
-//	18 mid-conversation-system-clear-at-2026-08-21  messages with clear_at, or requested
-//	19 dangerous-tool-use-2026-09-03     safeguards body, or requested
-//	20 effort-2025-11-24                 effort-supporting models with active thinking
-//	21 server-side-fallback-2026-06-01   explicit fallbacks or requested
-//	22 server-side-fallback-2026-07-01   fallbacks:"default" or requested
-//	23 fallback-credit-2026-06-01        fallback tokens, fallbacks, or requested
-//	24 thinking-binding-controls-2026-08-01  adaptive thinking, block_binding, or requested
-//	25 thinking-display-updates-2026-08-18  thinking.display=updates
-//	26 thinking-resumption-2026-07-17    requested only
-//	27 fast-mode-2026-02-01              speed:fast requests only
-//	28 afk-mode-2026-01-31               auto-mode sessions, forwarded when the caller sends it
-//	29 extended-cache-ttl-2025-04-11     OAuth credentials (omitted on subagent & probe)
-//	30 prompt-caching-evict-2026-05-12   evict_on_complete, or requested
-//	31 cache-diagnosis-2026-04-07        requests with diagnostics only
+//     1 claude-code-20250219              non-Haiku models
+//     2 oauth-2025-04-20                  OAuth credentials only
+//     3 context-1m-2025-08-07             [1m] model variants only
+//     4 interleaved-thinking-2025-05-14
+//     5 redact-thinking-2026-02-12        cli entrypoint, no thinking.display
+//     6 context-management-2025-06-27
+//     7 structured-outputs-2025-12-15     requested only (flag tengu_tool_pear defaults off)
+//     8 prompt-caching-scope-2026-01-05
+//     9 claude-code-20250219              Haiku models
+//     10 per-turn-control-2026-07-01       per_turn_effort models, or requested
+//     11 timing-2026-09-09                 per-turn timing body, or requested
+//     12 mid-conversation-tool-changes-2026-07-01  role=system models except sonnet-5
+//     13 inline-tools-2026-09-15           inline tool_addition blocks, or requested
+//     14 tool-provenance-2026-10-26        every request except probes and helpers
+//     15 advisor-tool-2026-03-01           advisor tools or requested
+//     16 thinking-token-count-2026-05-13
+//     17 advanced-tool-use-2025-11-20      tool search or another advanced tool-use feature
+//     18 mid-conversation-system-clear-at-2026-08-21  messages with clear_at, or requested
+//     19 dangerous-tool-use-2026-09-03     safeguards body, or requested
+//     20 effort-2025-11-24                 effort-supporting models with active thinking
+//     21 server-side-fallback-2026-06-01   explicit fallbacks or requested
+//     22 server-side-fallback-2026-07-01   fallbacks:"default" or requested
+//     23 fallback-credit-2026-06-01        fallback tokens, fallbacks, or requested
+//     24 thinking-binding-controls-2026-08-01  adaptive thinking, block_binding, or requested
+//     25 thinking-display-updates-2026-08-18  thinking.display=updates
+//     26 thinking-resumption-2026-07-17    requested only
+//     27 fast-mode-2026-02-01              speed:fast requests only
+//     28 afk-mode-2026-01-31               auto-mode sessions, forwarded when the caller sends it
+//     29 extended-cache-ttl-2025-04-11     OAuth credentials (omitted on subagent & probe)
+//     30 prompt-caching-evict-2026-05-12   evict_on_complete, or requested
+//     31 cache-diagnosis-2026-04-07        requests with diagnostics only
 //
 // An empty body keeps the optimistic role=system default, matching the cloaking
 // policy for unknown and future model IDs.
