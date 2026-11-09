@@ -8364,8 +8364,6 @@ func TestInsertClaudeMidConversationSystemMessages_IsIdempotent(t *testing.T) {
 // baseline to Claude Code 2.1.220 behavior captured against api.anthropic.com.
 // The OAuth profile was reverified on 2026-08-03 with two distinct accounts.
 func TestClaudeCodeCLIBetas_MatchesObservedClientMatrix(t *testing.T) {
-	const constants = "claude-code-20250219,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05"
-
 	tests := []struct {
 		name      string
 		body      string
@@ -8376,16 +8374,13 @@ func TestClaudeCodeCLIBetas_MatchesObservedClientMatrix(t *testing.T) {
 		{
 			name: "legacy model without tools omits both conditional betas",
 			body: `{"model":"claude-opus-4-6"}`,
-			want: constants + ",effort-2025-11-24",
+			want: "claude-code-20250219,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,effort-2025-11-24",
 		},
 		{
 			name:      "context 1m sits right after claude-code, not at the end",
 			body:      `{"model":"claude-opus-4-6"}`,
 			requested: map[string]bool{claudeContext1MBeta: true},
-			want: "claude-code-20250219,context-1m-2025-08-07," +
-				"interleaved-thinking-2025-05-14,redact-thinking-2026-02-12," +
-				"thinking-token-count-2026-05-13,context-management-2025-06-27," +
-				"prompt-caching-scope-2026-01-05,effort-2025-11-24",
+			want:      "claude-code-20250219,context-1m-2025-08-07,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,effort-2025-11-24",
 		},
 		{
 			name: "opus-5 1m variant reproduces the full observed order",
@@ -8395,85 +8390,73 @@ func TestClaudeCodeCLIBetas_MatchesObservedClientMatrix(t *testing.T) {
 				claudeServerSideFallbackBeta: true,
 				claudeFallbackCreditBeta:     true,
 			},
-			want: "claude-code-20250219,context-1m-2025-08-07," +
-				"interleaved-thinking-2025-05-14,redact-thinking-2026-02-12," +
-				"thinking-token-count-2026-05-13,context-management-2025-06-27," +
-				"prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,mid-conversation-tool-changes-2026-07-01," +
-				"advanced-tool-use-2025-11-20,effort-2025-11-24," +
-				"server-side-fallback-2026-06-01,fallback-credit-2026-06-01",
+			want: "claude-code-20250219,context-1m-2025-08-07,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-tool-changes-2026-07-01,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,advanced-tool-use-2025-11-20,effort-2025-11-24,server-side-fallback-2026-06-01,fallback-credit-2026-06-01",
 		},
 		{
 			name:      "structured outputs trails effort",
 			body:      `{"model":"claude-opus-4-6"}`,
 			requested: map[string]bool{claudeStructuredOutputsBeta: true},
-			want:      constants + ",effort-2025-11-24,structured-outputs-2025-12-15",
+			want:      "claude-code-20250219,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,structured-outputs-2025-12-15,prompt-caching-scope-2026-01-05,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,effort-2025-11-24",
 		},
 		{
 			name:      "unknown caller beta is not smuggled into the baseline",
 			body:      `{"model":"claude-opus-4-6"}`,
 			requested: map[string]bool{"totally-made-up-2030-01-01": true},
-			want:      constants + ",effort-2025-11-24",
+			want:      "claude-code-20250219,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,effort-2025-11-24",
 		},
 		{
 			name: "claude-sonnet-5 accepts role=system",
 			body: `{"model":"claude-sonnet-5"}`,
-			want: constants + ",mid-conversation-system-2026-04-07,mid-conversation-system-clear-at-2026-08-21,effort-2025-11-24",
+			want: "claude-code-20250219,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,effort-2025-11-24",
 		},
 		{
 			name: "claude-sonnet-5-5 carries tool changes beta unlike sonnet-5",
 			body: `{"model":"claude-sonnet-5-5"}`,
-			want: constants + ",mid-conversation-system-2026-04-07,mid-conversation-tool-changes-2026-07-01,mid-conversation-system-clear-at-2026-08-21,effort-2025-11-24",
+			want: "claude-code-20250219,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,per-turn-control-2026-07-01,mid-conversation-tool-changes-2026-07-01,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,effort-2025-11-24",
 		},
 		{
 			name: "claude-opus-4-8 accepts role=system",
 			body: `{"model":"claude-opus-4-8"}`,
-			want: constants + ",mid-conversation-system-2026-04-07,mid-conversation-tool-changes-2026-07-01,effort-2025-11-24",
+			want: "claude-code-20250219,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-tool-changes-2026-07-01,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,effort-2025-11-24",
 		},
 		{
 			name: "claude-fable-5 accepts role=system",
 			body: `{"model":"claude-fable-5"}`,
-			want: constants + ",mid-conversation-system-2026-04-07,mid-conversation-tool-changes-2026-07-01,effort-2025-11-24",
+			want: "claude-code-20250219,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-tool-changes-2026-07-01,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,effort-2025-11-24",
 		},
 		{
 			name: "opus-5-5 carries capability betas without optional body fields",
 			body: `{"model":"claude-opus-5-5","thinking":{"type":"adaptive"}}`,
-			want: constants + ",mid-conversation-system-2026-04-07,per-turn-control-2026-07-01,mid-conversation-tool-changes-2026-07-01,mid-conversation-system-clear-at-2026-08-21,effort-2025-11-24,thinking-binding-controls-2026-08-01",
+			want: "claude-code-20250219,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,per-turn-control-2026-07-01,mid-conversation-tool-changes-2026-07-01,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,effort-2025-11-24,thinking-binding-controls-2026-08-01",
 		},
 		{
 			name: "opus-5-5 without thinking still carries clear-at capability",
 			body: `{"model":"claude-opus-5-5"}`,
-			want: constants + ",mid-conversation-system-2026-04-07,per-turn-control-2026-07-01,mid-conversation-tool-changes-2026-07-01,mid-conversation-system-clear-at-2026-08-21,effort-2025-11-24",
+			want: "claude-code-20250219,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,per-turn-control-2026-07-01,mid-conversation-tool-changes-2026-07-01,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,effort-2025-11-24",
 		},
 		{
 			name: "fable-5-1 carries per-turn-control but not timing unless the body asks",
 			body: `{"model":"claude-fable-5-1"}`,
-			want: constants + ",mid-conversation-system-2026-04-07,per-turn-control-2026-07-01,mid-conversation-tool-changes-2026-07-01,mid-conversation-system-clear-at-2026-08-21,effort-2025-11-24",
+			want: "claude-code-20250219,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,per-turn-control-2026-07-01,mid-conversation-tool-changes-2026-07-01,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,effort-2025-11-24",
 		},
 		{
-			name: "opus-5-5 timing and the other 2.1.280 gated betas keep wire order",
+			name: "opus-5-5 timing and the other gated betas keep 2.1.321 wire order",
 			body: `{"model":"claude-opus-5-5","safeguards":[{}],"thinking":{"type":"adaptive","block_binding":{"prefix_mismatch_behavior":"omit"}},"messages":[{"role":"system","clear_at":"next_user_message","content":[{"type":"tool_addition","tool":{"definition":{"name":"bash"}}}]},{"role":"user","content":"x","output_config":{"timing":{"now":"2026-09-23T00:00:00Z"}}}],"cache_control":{"type":"ephemeral","evict_on_complete":true}}`,
 			requested: map[string]bool{
 				claudeThinkingResumptionBeta: true,
 			},
-			want: constants + ",mid-conversation-system-2026-04-07,per-turn-control-2026-07-01,timing-2026-09-09," +
-				"mid-conversation-tool-changes-2026-07-01,inline-tools-2026-09-15," +
-				"mid-conversation-system-clear-at-2026-08-21,dangerous-tool-use-2026-09-03,effort-2025-11-24," +
-				"thinking-binding-controls-2026-08-01,thinking-resumption-2026-07-17,prompt-caching-evict-2026-05-12",
+			want: "claude-code-20250219,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,per-turn-control-2026-07-01,timing-2026-09-09,mid-conversation-tool-changes-2026-07-01,inline-tools-2026-09-15,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,mid-conversation-system-clear-at-2026-08-21,dangerous-tool-use-2026-09-03,effort-2025-11-24,thinking-binding-controls-2026-08-01,thinking-resumption-2026-07-17,prompt-caching-evict-2026-05-12",
 		},
 		{
 			name: "claude-opus-4-7 stays on the reminder path",
 			body: `{"model":"claude-opus-4-7"}`,
-			want: constants + ",effort-2025-11-24",
+			want: "claude-code-20250219,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,effort-2025-11-24",
 		},
 		{
 			name:  "oauth uses tool search and the current cache TTL trailer",
 			body:  `{"model":"claude-opus-4-6","tools":[{"name":"Read","defer_loading":true}]}`,
 			oauth: true,
-			want: "claude-code-20250219,oauth-2025-04-20," +
-				"interleaved-thinking-2025-05-14,redact-thinking-2026-02-12," +
-				"thinking-token-count-2026-05-13,context-management-2025-06-27," +
-				"prompt-caching-scope-2026-01-05,advanced-tool-use-2025-11-20," +
-				"effort-2025-11-24,extended-cache-ttl-2025-04-11",
+			want:  "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,advanced-tool-use-2025-11-20,effort-2025-11-24,extended-cache-ttl-2025-04-11",
 		},
 		{
 			name:  "oauth precedes context-1m",
@@ -8484,110 +8467,99 @@ func TestClaudeCodeCLIBetas_MatchesObservedClientMatrix(t *testing.T) {
 				claudeServerSideFallbackBeta: true,
 				claudeFallbackCreditBeta:     true,
 			},
-			want: "claude-code-20250219,oauth-2025-04-20,context-1m-2025-08-07," +
-				"interleaved-thinking-2025-05-14,redact-thinking-2026-02-12," +
-				"thinking-token-count-2026-05-13,context-management-2025-06-27," +
-				"prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,mid-conversation-tool-changes-2026-07-01," +
-				"advanced-tool-use-2025-11-20,effort-2025-11-24," +
-				"server-side-fallback-2026-06-01,fallback-credit-2026-06-01," +
-				"extended-cache-ttl-2025-04-11",
+			want: "claude-code-20250219,oauth-2025-04-20,context-1m-2025-08-07,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-tool-changes-2026-07-01,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,advanced-tool-use-2025-11-20,effort-2025-11-24,server-side-fallback-2026-06-01,fallback-credit-2026-06-01,extended-cache-ttl-2025-04-11",
 		},
 		{
 			name: "api key path sends neither oauth beta",
 			body: `{"model":"claude-opus-4-6"}`,
-			want: constants + ",effort-2025-11-24",
+			want: "claude-code-20250219,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,effort-2025-11-24",
 		},
 		{
 			name: "claude-haiku-4-5-20251001 stays on the reminder path and omits effort",
 			body: `{"model":"claude-haiku-4-5-20251001"}`,
-			want: constants,
+			want: "interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,claude-code-20250219,tool-provenance-2026-10-26,thinking-token-count-2026-05-13",
 		},
 		{
 			name: "legacy model with inline tools no longer adds advanced tool use",
 			body: `{"model":"claude-sonnet-4-6","tools":[{"name":"Read"}]}`,
-			want: constants + ",effort-2025-11-24",
+			want: "claude-code-20250219,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,effort-2025-11-24",
 		},
 		{
 			name: "deferred tool adds advanced tool use",
 			body: `{"model":"claude-sonnet-4-6","tools":[{"name":"Read","defer_loading":true}]}`,
-			want: constants + ",advanced-tool-use-2025-11-20,effort-2025-11-24",
+			want: "claude-code-20250219,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,advanced-tool-use-2025-11-20,effort-2025-11-24",
 		},
 		{
 			name: "tool search server tool adds advanced tool use",
 			body: `{"model":"claude-sonnet-4-6","tools":[{"type":"tool_search_tool_regex_20251119","name":"tool_search_tool_regex"},{"name":"Read"}]}`,
-			want: constants + ",advanced-tool-use-2025-11-20,effort-2025-11-24",
+			want: "claude-code-20250219,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,advanced-tool-use-2025-11-20,effort-2025-11-24",
 		},
 		{
 			name: "tool use examples add advanced tool use",
 			body: `{"model":"claude-sonnet-4-6","tools":[{"name":"Read","input_examples":[{"path":"a.go"}]}]}`,
-			want: constants + ",advanced-tool-use-2025-11-20,effort-2025-11-24",
+			want: "claude-code-20250219,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,advanced-tool-use-2025-11-20,effort-2025-11-24",
 		},
 		{
 			name: "programmatic tool calling adds advanced tool use",
 			body: `{"model":"claude-sonnet-4-6","tools":[{"name":"Read","allowed_callers":["code_execution_20250825"]}]}`,
-			want: constants + ",advanced-tool-use-2025-11-20,effort-2025-11-24",
+			want: "claude-code-20250219,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,advanced-tool-use-2025-11-20,effort-2025-11-24",
 		},
 		{
 			name:      "requested advanced tool use is honored for inline tools",
 			body:      `{"model":"claude-sonnet-4-6","tools":[{"name":"Read"}]}`,
 			requested: map[string]bool{claudeAdvancedToolUseBeta: true},
-			want:      constants + ",advanced-tool-use-2025-11-20,effort-2025-11-24",
+			want:      "claude-code-20250219,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,advanced-tool-use-2025-11-20,effort-2025-11-24",
 		},
 		{
 			name: "role=system model without tools adds mid conversation system only",
 			body: `{"model":"claude-opus-5"}`,
-			want: constants + ",mid-conversation-system-2026-04-07,mid-conversation-tool-changes-2026-07-01,effort-2025-11-24",
+			want: "claude-code-20250219,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-tool-changes-2026-07-01,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,effort-2025-11-24",
 		},
 		{
 			name: "role=system model with tool search adds both in wire order",
 			body: `{"model":"claude-opus-5","tools":[{"name":"Read","defer_loading":true}]}`,
-			want: constants + ",mid-conversation-system-2026-04-07,mid-conversation-tool-changes-2026-07-01,advanced-tool-use-2025-11-20,effort-2025-11-24",
+			want: "claude-code-20250219,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-tool-changes-2026-07-01,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,advanced-tool-use-2025-11-20,effort-2025-11-24",
 		},
 		{
 			name: "empty tools array does not add advanced tool use",
 			body: `{"model":"claude-opus-4-6","tools":[]}`,
-			want: constants + ",effort-2025-11-24",
+			want: "claude-code-20250219,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,effort-2025-11-24",
 		},
 		{
 			name: "unknown future model keeps the optimistic role=system default",
 			body: `{"model":"claude-future-9"}`,
-			want: constants + ",mid-conversation-system-2026-04-07,mid-conversation-tool-changes-2026-07-01,effort-2025-11-24",
+			want: "claude-code-20250219,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-tool-changes-2026-07-01,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,effort-2025-11-24",
 		},
 		{
 			name: "thinking display summarized drops redact-thinking",
 			body: `{"model":"claude-opus-5","thinking":{"type":"adaptive","display":"summarized"}}`,
-			want: "claude-code-20250219,interleaved-thinking-2025-05-14," +
-				"thinking-token-count-2026-05-13,context-management-2025-06-27," +
-				"prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,mid-conversation-tool-changes-2026-07-01," +
-				"effort-2025-11-24",
+			want: "claude-code-20250219,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-tool-changes-2026-07-01,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,effort-2025-11-24,thinking-binding-controls-2026-08-01",
 		},
 		{
 			name: "thinking display omitted drops redact-thinking as well",
 			body: `{"model":"claude-opus-4-6","thinking":{"type":"enabled","budget_tokens":2048,"display":"omitted"}}`,
-			want: "claude-code-20250219,interleaved-thinking-2025-05-14," +
-				"thinking-token-count-2026-05-13,context-management-2025-06-27," +
-				"prompt-caching-scope-2026-01-05,effort-2025-11-24",
+			want: "claude-code-20250219,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,effort-2025-11-24",
 		},
 		{
 			name: "thinking without display keeps redact-thinking",
 			body: `{"model":"claude-opus-4-6","thinking":{"type":"adaptive"}}`,
-			want: constants + ",effort-2025-11-24",
+			want: "claude-code-20250219,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,effort-2025-11-24,thinking-binding-controls-2026-08-01",
 		},
 		{
 			name: "blank display value keeps redact-thinking",
 			body: `{"model":"claude-opus-4-6","thinking":{"type":"adaptive","display":"  "}}`,
-			want: constants + ",effort-2025-11-24",
+			want: "claude-code-20250219,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,effort-2025-11-24,thinking-binding-controls-2026-08-01",
 		},
 		{
 			name:      "advisor tool beta requested placed before advanced-tool-use",
 			body:      `{"model":"claude-opus-5","tools":[{"name":"Read","defer_loading":true}]}`,
 			requested: map[string]bool{"advisor-tool-2026-03-01": true},
-			want:      constants + ",mid-conversation-system-2026-04-07,mid-conversation-tool-changes-2026-07-01,advisor-tool-2026-03-01,advanced-tool-use-2025-11-20,effort-2025-11-24",
+			want:      "claude-code-20250219,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-tool-changes-2026-07-01,tool-provenance-2026-10-26,advisor-tool-2026-03-01,thinking-token-count-2026-05-13,advanced-tool-use-2025-11-20,effort-2025-11-24",
 		},
 		{
 			name: "body with advisor server tool automatically adds advisor-tool beta",
 			body: `{"model":"claude-opus-5","tools":[{"type":"advisor_20260301","name":"advisor"}]}`,
-			want: constants + ",mid-conversation-system-2026-04-07,mid-conversation-tool-changes-2026-07-01,advisor-tool-2026-03-01,effort-2025-11-24",
+			want: "claude-code-20250219,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-tool-changes-2026-07-01,tool-provenance-2026-10-26,advisor-tool-2026-03-01,thinking-token-count-2026-05-13,effort-2025-11-24",
 		},
 		{
 			// Captured 2026-09-02 from Claude Code 2.1.258 (cli entrypoint, OAuth,
@@ -8600,120 +8572,75 @@ func TestClaudeCodeCLIBetas_MatchesObservedClientMatrix(t *testing.T) {
 				claudeAdvisorToolBeta: true,
 				claudeAFKModeBeta:     true,
 			},
-			want: "claude-code-20250219,oauth-2025-04-20," +
-				"interleaved-thinking-2025-05-14,redact-thinking-2026-02-12," +
-				"thinking-token-count-2026-05-13,context-management-2025-06-27," +
-				"prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,per-turn-control-2026-07-01,mid-conversation-tool-changes-2026-07-01," +
-				"advisor-tool-2026-03-01,mid-conversation-system-clear-at-2026-08-21,effort-2025-11-24,thinking-binding-controls-2026-08-01," +
-				"afk-mode-2026-01-31,extended-cache-ttl-2025-04-11",
+			want: "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,per-turn-control-2026-07-01,mid-conversation-tool-changes-2026-07-01,tool-provenance-2026-10-26,advisor-tool-2026-03-01,thinking-token-count-2026-05-13,effort-2025-11-24,thinking-binding-controls-2026-08-01,afk-mode-2026-01-31,extended-cache-ttl-2025-04-11",
 		},
 		{
 			name:      "afk-mode sits between fast-mode and extended-cache-ttl",
 			body:      `{"model":"claude-opus-5","speed":"fast"}`,
 			oauth:     true,
 			requested: map[string]bool{claudeAFKModeBeta: true},
-			want: "claude-code-20250219,oauth-2025-04-20," +
-				"interleaved-thinking-2025-05-14,redact-thinking-2026-02-12," +
-				"thinking-token-count-2026-05-13,context-management-2025-06-27," +
-				"prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,mid-conversation-tool-changes-2026-07-01," +
-				"effort-2025-11-24,fast-mode-2026-02-01," +
-				"afk-mode-2026-01-31,extended-cache-ttl-2025-04-11",
+			want:      "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-tool-changes-2026-07-01,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,effort-2025-11-24,fast-mode-2026-02-01,afk-mode-2026-01-31,extended-cache-ttl-2025-04-11",
 		},
 		{
 			name:  "afk-mode is not added unless the caller sent it",
 			body:  `{"model":"claude-opus-5"}`,
 			oauth: true,
-			want: "claude-code-20250219,oauth-2025-04-20," +
-				"interleaved-thinking-2025-05-14,redact-thinking-2026-02-12," +
-				"thinking-token-count-2026-05-13,context-management-2025-06-27," +
-				"prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,mid-conversation-tool-changes-2026-07-01," +
-				"effort-2025-11-24,extended-cache-ttl-2025-04-11",
+			want:  "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-tool-changes-2026-07-01,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,effort-2025-11-24,extended-cache-ttl-2025-04-11",
 		},
 		{
 			name: "thinking display updates emits thinking-display-updates beta and drops redact-thinking",
 			body: `{"model":"claude-fable-5-1","thinking":{"type":"adaptive","display":"updates"}}`,
-			want: "claude-code-20250219,interleaved-thinking-2025-05-14," +
-				"thinking-token-count-2026-05-13,context-management-2025-06-27," +
-				"prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,per-turn-control-2026-07-01,mid-conversation-tool-changes-2026-07-01," +
-				"mid-conversation-system-clear-at-2026-08-21,effort-2025-11-24,thinking-binding-controls-2026-08-01,thinking-display-updates-2026-08-18",
+			want: "claude-code-20250219,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,per-turn-control-2026-07-01,mid-conversation-tool-changes-2026-07-01,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,effort-2025-11-24,thinking-binding-controls-2026-08-01,thinking-display-updates-2026-08-18",
 		},
 		{
 			name: "body with fallbacks automatically adds server-side-fallback beta",
 			body: `{"model":"claude-fable-5-1","fallbacks":[{"model":"claude-opus-5"}]}`,
-			want: constants + ",mid-conversation-system-2026-04-07,per-turn-control-2026-07-01,mid-conversation-tool-changes-2026-07-01,mid-conversation-system-clear-at-2026-08-21,effort-2025-11-24,server-side-fallback-2026-06-01",
+			want: "claude-code-20250219,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,per-turn-control-2026-07-01,mid-conversation-tool-changes-2026-07-01,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,effort-2025-11-24,server-side-fallback-2026-06-01",
 		},
 		{
 			name:  "subagent request omits extended-cache-ttl beta",
 			body:  `{"model":"claude-sonnet-5","system":[{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.258.0ab; cc_is_subagent=true;"}]}`,
 			oauth: true,
-			want: "claude-code-20250219,oauth-2025-04-20," +
-				"interleaved-thinking-2025-05-14,redact-thinking-2026-02-12," +
-				"thinking-token-count-2026-05-13,context-management-2025-06-27," +
-				"prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,mid-conversation-system-clear-at-2026-08-21," +
-				"effort-2025-11-24",
+			want:  "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,effort-2025-11-24",
 		},
 		{
 			name:  "probe request max_tokens=1 omits effort and extended-cache-ttl betas",
 			body:  `{"model":"claude-sonnet-5","max_tokens":1}`,
 			oauth: true,
-			want: "claude-code-20250219,oauth-2025-04-20," +
-				"interleaved-thinking-2025-05-14,redact-thinking-2026-02-12," +
-				"thinking-token-count-2026-05-13,context-management-2025-06-27," +
-				"prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,mid-conversation-system-clear-at-2026-08-21",
+			want:  "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,thinking-token-count-2026-05-13",
 		},
 		{
 			name:      "haiku model omits effort beta even if requested",
 			body:      `{"model":"claude-haiku-4-5-20251001"}`,
 			requested: map[string]bool{"effort-2025-11-24": true},
 			oauth:     true,
-			want: "claude-code-20250219,oauth-2025-04-20," +
-				"interleaved-thinking-2025-05-14,redact-thinking-2026-02-12," +
-				"thinking-token-count-2026-05-13,context-management-2025-06-27," +
-				"prompt-caching-scope-2026-01-05," +
-				"extended-cache-ttl-2025-04-11",
+			want:      "oauth-2025-04-20,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,claude-code-20250219,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,extended-cache-ttl-2025-04-11",
 		},
 		{
 			name:      "disabled thinking omits effort beta even if requested",
 			body:      `{"model":"claude-sonnet-5","thinking":{"type":"disabled"}}`,
 			requested: map[string]bool{"effort-2025-11-24": true},
 			oauth:     true,
-			want: "claude-code-20250219,oauth-2025-04-20," +
-				"interleaved-thinking-2025-05-14,redact-thinking-2026-02-12," +
-				"thinking-token-count-2026-05-13,context-management-2025-06-27," +
-				"prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,mid-conversation-system-clear-at-2026-08-21," +
-				"extended-cache-ttl-2025-04-11",
+			want:      "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,extended-cache-ttl-2025-04-11",
 		},
 		{
 			name:  "body with fallback_credit_token automatically adds fallback-credit beta",
 			body:  `{"model":"claude-sonnet-5","fallback_credit_token":"fct_12345"}`,
 			oauth: true,
-			want: "claude-code-20250219,oauth-2025-04-20," +
-				"interleaved-thinking-2025-05-14,redact-thinking-2026-02-12," +
-				"thinking-token-count-2026-05-13,context-management-2025-06-27," +
-				"prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,mid-conversation-system-clear-at-2026-08-21," +
-				"effort-2025-11-24,fallback-credit-2026-06-01,extended-cache-ttl-2025-04-11",
+			want:  "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,effort-2025-11-24,fallback-credit-2026-06-01,extended-cache-ttl-2025-04-11",
 		},
 		{
 			name:  "oauth body with fallbacks automatically adds fallback-credit beta",
 			body:  `{"model":"claude-fable-5-1","fallbacks":[{"model":"claude-opus-5"}]}`,
 			oauth: true,
-			want: "claude-code-20250219,oauth-2025-04-20," +
-				"interleaved-thinking-2025-05-14,redact-thinking-2026-02-12," +
-				"thinking-token-count-2026-05-13,context-management-2025-06-27," +
-				"prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,per-turn-control-2026-07-01,mid-conversation-tool-changes-2026-07-01," +
-				"mid-conversation-system-clear-at-2026-08-21,effort-2025-11-24,server-side-fallback-2026-06-01,fallback-credit-2026-06-01," +
-				"extended-cache-ttl-2025-04-11",
+			want:  "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,per-turn-control-2026-07-01,mid-conversation-tool-changes-2026-07-01,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,effort-2025-11-24,server-side-fallback-2026-06-01,fallback-credit-2026-06-01,extended-cache-ttl-2025-04-11",
 		},
 		{
 			name:      "requested fallback-credit beta is honored",
 			body:      `{"model":"claude-sonnet-5"}`,
 			requested: map[string]bool{claudeFallbackCreditBeta: true},
 			oauth:     true,
-			want: "claude-code-20250219,oauth-2025-04-20," +
-				"interleaved-thinking-2025-05-14,redact-thinking-2026-02-12," +
-				"thinking-token-count-2026-05-13,context-management-2025-06-27," +
-				"prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,mid-conversation-system-clear-at-2026-08-21," +
-				"effort-2025-11-24,fallback-credit-2026-06-01,extended-cache-ttl-2025-04-11",
+			want:      "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,tool-provenance-2026-10-26,thinking-token-count-2026-05-13,effort-2025-11-24,fallback-credit-2026-06-01,extended-cache-ttl-2025-04-11",
 		},
 	}
 
